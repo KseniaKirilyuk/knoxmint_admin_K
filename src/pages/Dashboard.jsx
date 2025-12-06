@@ -50,10 +50,10 @@ export default function Dashboard() {
   const fetchDashboardData = async () => {
     try {
       const [statsRes, groupsRes, timeRes, recentRes] = await Promise.all([
-        api.get('/dashboard/stats'),
-        api.get('/dashboard/sales-by-group'),
-        api.get('/dashboard/sales-over-time?groupBy=week'),
-        api.get('/dashboard/recent-transactions?limit=5')
+        api.get('/dashboard?action=stats'),
+        api.get('/dashboard?action=sales-by-group'),
+        api.get('/dashboard?action=sales-over-time&groupBy=week'),
+        api.get('/dashboard?action=recent-transactions&limit=5')
       ])
       
       setStats(statsRes.data)
