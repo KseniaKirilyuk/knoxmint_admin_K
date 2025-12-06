@@ -1,3 +1,4 @@
+console.log('ENV CHECK:', process.env.JWT_SECRET ? 'JWT_SECRET exists' : 'JWT_SECRET is MISSING');
 import { query } from '../_lib/db.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
