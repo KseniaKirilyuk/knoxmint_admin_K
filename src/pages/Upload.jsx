@@ -35,9 +35,12 @@ export default function Upload() {
   const parseExcelDate = (value) => {
     if (!value) return null
     
-    // Handle Date objects (from cellDates: true)
+    // Handle Date objects (from cellDates: true) - use local date to avoid timezone shift
     if (value instanceof Date) {
-      return value.toISOString().split('T')[0]
+      const year = value.getFullYear()
+      const month = String(value.getMonth() + 1).padStart(2, '0')
+      const day = String(value.getDate()).padStart(2, '0')
+      return `${year}-${month}-${day}`
     }
     
     // Handle strings like "7/23/2023" or "07/23/2023"
@@ -49,10 +52,13 @@ export default function Upload() {
         return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
       }
       
-      // Try standard parsing
+      // Try standard parsing - use local date
       const parsed = new Date(value)
       if (!isNaN(parsed)) {
-        return parsed.toISOString().split('T')[0]
+        const year = parsed.getFullYear()
+        const month = String(parsed.getMonth() + 1).padStart(2, '0')
+        const day = String(parsed.getDate()).padStart(2, '0')
+        return `${year}-${month}-${day}`
       }
       return null
     }
