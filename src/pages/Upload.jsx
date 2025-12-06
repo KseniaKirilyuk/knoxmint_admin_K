@@ -34,13 +34,30 @@ export default function Upload() {
 
   const parseExcelDate = (value) => {
     if (!value) return null
+    
+    // Handle Date objects (from cellDates: true)
+    if (value instanceof Date) {
+      return value.toISOString().split('T')[0]
+    }
+    
+    // Handle strings like "7/23/2023" or "07/23/2023"
     if (typeof value === 'string') {
+      // Try M/D/YYYY or MM/DD/YYYY format
+      const mdyMatch = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+      if (mdyMatch) {
+        const [, month, day, year] = mdyMatch
+        return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
+      }
+      
+      // Try standard parsing
       const parsed = new Date(value)
       if (!isNaN(parsed)) {
         return parsed.toISOString().split('T')[0]
       }
-      return value
+      return null
     }
+    
+    // Handle Excel serial numbers
     if (typeof value === 'number') {
       const date = XLSX.SSF.parse_date_code(value)
       if (date) {
