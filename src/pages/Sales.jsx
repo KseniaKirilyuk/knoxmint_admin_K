@@ -152,7 +152,7 @@ export default function Sales() {
                 transactions.map((tx) => (
                   <tr key={tx.transaction_id} className="hover:bg-slate-50">
                     <td className="table-cell whitespace-nowrap">
-                      {new Date(tx.sale_date).toLocaleDateString()}
+                      {tx.sale_date ? tx.sale_date.split('T')[0].replace(/(\d{4})-(\d{2})-(\d{2})/, (_, y, m, d) => `${parseInt(m)}/${parseInt(d)}/${y}`) : '-'}
                     </td>
                     <td className="table-cell font-mono text-xs">{tx.listing_id}</td>
                     <td className="table-cell">

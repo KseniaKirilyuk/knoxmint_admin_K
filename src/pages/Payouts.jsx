@@ -216,7 +216,7 @@ export default function Payouts() {
                 payoutHistory.map((payout) => (
                   <tr key={payout.payout_id} className="hover:bg-slate-50">
                     <td className="table-cell">
-                      {new Date(payout.payout_date).toLocaleDateString()}
+                      {payout.payout_date ? payout.payout_date.split('T')[0].replace(/(\d{4})-(\d{2})-(\d{2})/, (_, y, m, d) => `${parseInt(m)}/${parseInt(d)}/${y}`) : '-'}
                     </td>
                     <td className="table-cell">
                       <div>

@@ -133,14 +133,25 @@ export default function Dashboard() {
                   dataKey="period" 
                   tick={{ fontSize: 12 }}
                   tickFormatter={(value) => {
-                    const date = new Date(value)
-                    return `${date.getMonth() + 1}/${date.getDate()}`
+                    if (!value) return ''
+                    const parts = value.split('-')
+                    if (parts.length === 3) {
+                      return `${parseInt(parts[1])}/${parseInt(parts[2])}`
+                    }
+                    return value
                   }}
                 />
                 <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `$${v}`} />
                 <Tooltip 
                   formatter={(value) => [`$${parseFloat(value).toFixed(2)}`, 'Revenue']}
-                  labelFormatter={(label) => new Date(label).toLocaleDateString()}
+                  labelFormatter={(label) => {
+                    if (!label) return ''
+                    const parts = label.split('-')
+                    if (parts.length === 3) {
+                      return `${parseInt(parts[1])}/${parseInt(parts[2])}/${parts[0]}`
+                    }
+                    return label
+                  }}
                 />
                 <Line 
                   type="monotone" 
@@ -201,7 +212,7 @@ export default function Dashboard() {
                 {recentTransactions.map((tx) => (
                   <tr key={tx.transaction_id} className="hover:bg-slate-50">
                     <td className="table-cell">
-                      {new Date(tx.sale_date).toLocaleDateString()}
+                      {tx.sale_date ? tx.sale_date.split('T')[0].replace(/(\d{4})-(\d{2})-(\d{2})/, (_, y, m, d) => `${parseInt(m)}/${parseInt(d)}/${y}`) : '-'}
                     </td>
                     <td className="table-cell font-mono text-xs">{tx.listing_id}</td>
                     <td className="table-cell">
