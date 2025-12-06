@@ -1,194 +1,120 @@
 # KnoxMint Admin Dashboard
 
-A comprehensive admin dashboard for managing US Mint coin sales, payout tracking, and profit distribution among group members.
+Admin dashboard for US Mint coin sales, deployed on Vercel with Neon Postgres.
 
-## 🪙 Overview
+## 🚀 Deploy to Vercel + Neon
 
-KnoxMint Admin Dashboard helps manage:
-- **Sales Transactions** - Track eBay sales of graded Morgan & Peace dollars
-- **Group Management** - Organize coins into selling groups (NGC FDI, PCGS FR, etc.)
-- **User Contributions** - Track member ownership and profit shares
-- **Payout Tracking** - Calculate and record payouts to group members
-- **Excel Import** - Bulk import sales data from Excel spreadsheets
+### Step 1: Push to GitHub
 
-## 🚀 Quick Start
-
-### Prerequisites
-- Node.js 18+
-- PostgreSQL 14+ (or use SQLite for development)
-- npm or yarn
-
-### Installation
-
-1. **Clone the repository**
 ```bash
-git clone https://github.com/mlweiss/knoxmint_admin_dashboard.git
-cd knoxmint_admin_dashboard
+# Replace your repo files with this version
+git add .
+git commit -m "Restructure for Vercel + Neon deployment"
+git push origin main
 ```
 
-2. **Set up the backend**
+### Step 2: Create Neon Database
+
+1. In Vercel, go to your project → **Storage** tab
+2. Click **"Create"** next to **Neon** (Serverless Postgres)
+3. Name it `knoxmint-db` → Follow the prompts
+4. Neon automatically adds `DATABASE_URL` to your environment variables
+
+**Or create directly at [neon.tech](https://neon.tech):**
+1. Sign up / Log in
+2. Create a new project
+3. Copy the connection string
+4. Add it to Vercel: Settings → Environment Variables → `DATABASE_URL`
+
+### Step 3: Add JWT Secret
+
+1. Go to Vercel **Settings** → **Environment Variables**
+2. Add:
+   - Name: `JWT_SECRET`
+   - Value: `knoxmint-secret-2024` (or any random string)
+3. Click **Save**
+
+### Step 4: Initialize Database
+
+Run these commands locally:
+
 ```bash
-cd backend
-cp .env.example .env
-# Edit .env with your database credentials
+# Install dependencies first
 npm install
+
+# Get your DATABASE_URL from:
+# - Vercel → Storage → your database → Connection string
+# - Or Neon dashboard → Connection Details
+
+# Initialize schema
+DATABASE_URL="postgres://..." node scripts/initDb.js
+
+# Add sample data
+DATABASE_URL="postgres://..." node scripts/seedDb.js
 ```
 
-3. **Initialize the database**
-```bash
-# Make sure PostgreSQL is running
-npm run db:init
-npm run db:seed  # Optional: adds sample data
-```
+### Step 5: Deploy
 
-4. **Set up the frontend**
-```bash
-cd ../frontend
-npm install
-```
+1. Go to **Deployments** tab in Vercel
+2. Click **"Redeploy"** on the latest deployment
 
-5. **Start development servers**
+### Done! 🎉
 
-In one terminal (backend):
-```bash
-cd backend
-npm run dev
-```
+Your app is live at `https://your-project.vercel.app`
 
-In another terminal (frontend):
-```bash
-cd frontend
-npm run dev
-```
-
-6. **Open the app**
-Navigate to http://localhost:3000
-
-**Default login:**
+**Login:**
 - Username: `admin`
 - Password: `admin123`
 
-## 📁 Project Structure
+---
+
+## Project Structure
 
 ```
-knoxmint_admin_dashboard/
-├── backend/
-│   ├── src/
-│   │   ├── api/          # Express route handlers
-│   │   ├── config/       # Database configuration
-│   │   ├── middleware/   # Auth middleware
-│   │   └── utils/        # DB scripts
-│   ├── package.json
-│   └── .env.example
-├── frontend/
-│   ├── src/
-│   │   ├── components/   # React components
-│   │   ├── pages/        # Page components
-│   │   ├── hooks/        # Custom hooks
-│   │   ├── lib/          # Utilities
-│   │   └── styles/       # CSS
-│   ├── package.json
-│   └── vite.config.js
-├── database/
-│   └── schema.sql        # Full database schema
-└── README.md
+knoxmint-vercel/
+├── api/                    # Vercel Serverless Functions
+│   ├── _lib/
+│   │   └── db.js          # Database connection
+│   ├── auth/
+│   ├── dashboard/
+│   ├── groups/
+│   ├── payouts/
+│   ├── transactions/
+│   └── users/
+├── src/                    # React frontend
+├── scripts/                # Database setup
+│   ├── initDb.js
+│   └── seedDb.js
+├── vercel.json
+└── package.json
 ```
 
-## 🗄️ Database Schema
+## Environment Variables
 
-### Core Tables
-- **users** - Group members and admins
-- **groups** - Selling groups (NGC FDI, PCGS FR, etc.)
-- **mint_products** - US Mint product reference
-- **graded_coins** - Inventory with grades and costs
-- **sales_transactions** - Individual sales records
-- **user_contributions** - User ownership per group
-- **payouts** - Payment tracking
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | Neon Postgres connection string |
+| `JWT_SECRET` | Secret key for JWT tokens |
 
-### Key Relationships
-- Users belong to multiple groups via `user_contributions`
-- Sales are linked to groups and optionally to specific graded coins
-- Payouts track payments to users per group
+## Local Development
 
-## 💰 Profit Share Calculation
+```bash
+# Install Vercel CLI
+npm i -g vercel
 
-Each group has configurable profit share settings:
-- **Percentage** (default: 33%) - Base percentage of profit
-- **Minimum** (default: $8.00) - Floor for profit share
-- **Maximum** (optional) - Cap for profit share
+# Link to your project
+vercel link
 
-```
-profit_share = profit × percentage
-profit_share = max(profit_share, minimum)
-if maximum: profit_share = min(profit_share, maximum)
+# Pull environment variables
+vercel env pull .env.local
+
+# Run locally
+vercel dev
 ```
 
-## 📊 Features
+## Tech Stack
 
-### Phase 1 (Current)
-- ✅ Excel file import for sales transactions
-- ✅ Sales dashboard with filtering and pagination
-- ✅ Payout tracking and management
-- ✅ User and group management
-- ✅ Profit share calculations
-- ✅ Data visualization with charts
-
-### Phase 2 (Planned)
-- ⏳ eBay API integration for automatic sales sync
-- ⏳ Automated daily transaction imports
-- ⏳ Real-time fee calculations
-- ⏳ Enhanced reporting
-
-## 🔧 Configuration
-
-### Environment Variables
-
-```env
-# Database
-DATABASE_URL=postgresql://user:pass@localhost:5432/knoxmint
-
-# Server
-PORT=3001
-NODE_ENV=development
-
-# JWT
-JWT_SECRET=your-secret-key
-JWT_EXPIRES_IN=7d
-
-# eBay API (Phase 2)
-EBAY_APP_ID=
-EBAY_DEV_ID=
-EBAY_CERT_ID=
-```
-
-## 📝 Excel Import Format
-
-The import feature expects Excel files with sheets named after groups:
-- `NGC FDI`, `NGC FR`, `PCGS RP FS`, etc.
-
-Required columns:
-- `Listing` - eBay listing ID
-- `Date Sold` - Sale date
-- `Price Sold` - Sale price
-- `Net eBay Fee` - eBay fees
-- `Advertising` - Ad fees
-- `Shipping and Packaging` - Shipping costs
-- `Total Payout` - Net payout
-- `Coin Cost` - Cost basis
-- `Profit` - Calculated profit
-- `Profit Share` - Member share
-
-## 🛠️ Tech Stack
-
-- **Frontend**: React 18, Tailwind CSS, Recharts, React Router
-- **Backend**: Node.js, Express
-- **Database**: PostgreSQL
-- **Build**: Vite
-
-## 📄 License
-
-Private - All rights reserved.
-
-## 🤝 Support
-
-For questions or issues, contact the development team.
+- **Frontend**: React + Tailwind CSS + Vite
+- **Backend**: Vercel Serverless Functions
+- **Database**: Neon Postgres
+- **Auth**: JWT
