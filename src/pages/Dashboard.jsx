@@ -139,7 +139,7 @@ export default function Dashboard() {
                 />
                 <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `$${v}`} />
                 <Tooltip 
-                  formatter={(value) => [`$${value.toFixed(2)}`, 'Revenue']}
+                  formatter={(value) => [`$${parseFloat(value).toFixed(2)}`, 'Revenue']}
                   labelFormatter={(label) => new Date(label).toLocaleDateString()}
                 />
                 <Line 
@@ -168,7 +168,7 @@ export default function Dashboard() {
                   tick={{ fontSize: 12 }}
                   width={100}
                 />
-                <Tooltip formatter={(value) => [`$${value.toFixed(2)}`, 'Revenue']} />
+                <Tooltip formatter={(value) => [`$${parseFloat(value).toFixed(2)}`, 'Revenue']} />
                 <Bar dataKey="total_revenue" fill="#0284c7" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
