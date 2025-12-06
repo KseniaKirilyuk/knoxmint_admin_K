@@ -15,6 +15,21 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === 'GET') {
+      const { action, groupId } = req.query;
+
+      // Get members of a specific group
+      if (action === 'members' && groupId) {
+        const result = await query(`
+          SELECT DISTINCT u.user_id, u.username, u.email, u.full_name
+          FROM users u
+          INNER JOIN user_contributions uc ON u.user_id = uc.user_id
+          WHERE uc.group_id = $1
+          ORDER BY u.full_name, u.username
+        `, [groupId]);
+        return res.json(result.rows);
+      }
+
+      // Get all groups with stats
       const result = await query(`
         SELECT 
           g.*,
@@ -33,7 +48,40 @@ export default async function handler(req, res) {
     if (req.method === 'POST') {
       if (user.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
       
-      const { groupName, grader, labelType, profitSharePercentage, profitShareMinimum, profitShareMaximum, description } = req.body;
+      const { action, groupId, userId, groupName, grader, labelType, profitSharePercentage, profitShareMinimum, profitShareMaximum, description } = req.body;
+
+      // Add member to group
+      if (action === 'addMember') {
+        if (!groupId || !userId) return res.status(400).json({ error: 'Group ID and User ID required' });
+        
+        // Check if already a member
+        const existing = await query(
+          'SELECT id FROM user_contributions WHERE user_id = $1 AND group_id = $2',
+          [userId, groupId]
+        );
+        if (existing.rows.length > 0) {
+          return res.status(400).json({ error: 'User is already a member of this group' });
+        }
+
+        await query(
+          'INSERT INTO user_contributions (user_id, group_id, quantity) VALUES ($1, $2, 0)',
+          [userId, groupId]
+        );
+        return res.json({ success: true, message: 'Member added' });
+      }
+
+      // Remove member from group
+      if (action === 'removeMember') {
+        if (!groupId || !userId) return res.status(400).json({ error: 'Group ID and User ID required' });
+        
+        await query(
+          'DELETE FROM user_contributions WHERE user_id = $1 AND group_id = $2',
+          [userId, groupId]
+        );
+        return res.json({ success: true, message: 'Member removed' });
+      }
+
+      // Create new group
       if (!groupName) return res.status(400).json({ error: 'Group name required' });
 
       const result = await query(

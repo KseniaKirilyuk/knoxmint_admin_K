@@ -1,11 +1,15 @@
 import { useState, useEffect } from 'react'
-import { Plus, Users, TrendingUp, Settings, X } from 'lucide-react'
+import { Plus, Users, TrendingUp, Settings, X, UserPlus, Trash2 } from 'lucide-react'
 import api from '../lib/api'
 
 export default function Groups() {
   const [groups, setGroups] = useState([])
+  const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
+  const [showMembersModal, setShowMembersModal] = useState(false)
+  const [selectedGroup, setSelectedGroup] = useState(null)
+  const [groupMembers, setGroupMembers] = useState([])
   const [editingGroup, setEditingGroup] = useState(null)
   const [formData, setFormData] = useState({
     groupName: '',
@@ -19,6 +23,7 @@ export default function Groups() {
 
   useEffect(() => {
     fetchGroups()
+    fetchUsers()
   }, [])
 
   const fetchGroups = async () => {
@@ -29,6 +34,62 @@ export default function Groups() {
       console.error('Error fetching groups:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchUsers = async () => {
+    try {
+      const response = await api.get('/users')
+      setUsers(response.data.filter(u => u.role !== 'admin'))
+    } catch (error) {
+      console.error('Error fetching users:', error)
+    }
+  }
+
+  const fetchGroupMembers = async (groupId) => {
+    try {
+      const response = await api.get(`/groups?action=members&groupId=${groupId}`)
+      setGroupMembers(response.data)
+    } catch (error) {
+      console.error('Error fetching group members:', error)
+      setGroupMembers([])
+    }
+  }
+
+  const handleManageMembers = async (group) => {
+    setSelectedGroup(group)
+    await fetchGroupMembers(group.group_id)
+    setShowMembersModal(true)
+  }
+
+  const handleAddMember = async (userId) => {
+    try {
+      await api.post('/groups', {
+        action: 'addMember',
+        groupId: selectedGroup.group_id,
+        userId: userId
+      })
+      await fetchGroupMembers(selectedGroup.group_id)
+      fetchGroups()
+    } catch (error) {
+      console.error('Error adding member:', error)
+      alert(error.response?.data?.error || 'Error adding member')
+    }
+  }
+
+  const handleRemoveMember = async (userId) => {
+    if (!confirm('Remove this member from the group?')) return
+    try {
+      await api.post('/groups', {
+        action: 'removeMember',
+        groupId: selectedGroup.group_id,
+        userId: userId
+      })
+      await fetchGroupMembers(selectedGroup.group_id)
+      fetchGroups()
+    } catch (error) {
+      console.error('Error removing member:', error)
+      alert(error.response?.data?.error || 'Error removing member')
     }
   }
 
@@ -79,6 +140,8 @@ export default function Groups() {
     })
     setShowModal(true)
   }
+
+  const nonMembers = users.filter(u => !groupMembers.find(m => m.user_id === u.user_id))
 
   return (
     <div className="space-y-6">
@@ -174,13 +237,22 @@ export default function Groups() {
                 </div>
               </div>
 
-              <button
-                onClick={() => handleEdit(group)}
-                className="mt-4 btn btn-secondary w-full gap-2"
-              >
-                <Settings className="w-4 h-4" />
-                Edit Group
-              </button>
+              <div className="flex gap-2 mt-4">
+                <button
+                  onClick={() => handleManageMembers(group)}
+                  className="btn btn-secondary flex-1 gap-2"
+                >
+                  <Users className="w-4 h-4" />
+                  Members
+                </button>
+                <button
+                  onClick={() => handleEdit(group)}
+                  className="btn btn-secondary flex-1 gap-2"
+                >
+                  <Settings className="w-4 h-4" />
+                  Settings
+                </button>
+              </div>
             </div>
           ))}
 
@@ -323,6 +395,90 @@ export default function Groups() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* Members Modal */}
+      {showMembersModal && selectedGroup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-white">
+              <div>
+                <h2 className="text-lg font-semibold">Manage Members</h2>
+                <p className="text-sm text-slate-500">{selectedGroup.group_name}</p>
+              </div>
+              <button
+                onClick={() => setShowMembersModal(false)}
+                className="p-2 hover:bg-slate-100 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-6">
+              {/* Current Members */}
+              <div>
+                <h3 className="font-medium text-slate-900 mb-3">Current Members ({groupMembers.length})</h3>
+                {groupMembers.length === 0 ? (
+                  <p className="text-sm text-slate-500 py-4 text-center bg-slate-50 rounded-lg">
+                    No members yet. Add members below.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {groupMembers.map((member) => (
+                      <div key={member.user_id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                        <div>
+                          <p className="font-medium">{member.full_name || member.username}</p>
+                          <p className="text-sm text-slate-500">{member.email || member.username}</p>
+                        </div>
+                        <button
+                          onClick={() => handleRemoveMember(member.user_id)}
+                          className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
+                          title="Remove member"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Add Members */}
+              <div>
+                <h3 className="font-medium text-slate-900 mb-3">Add Members</h3>
+                {nonMembers.length === 0 ? (
+                  <p className="text-sm text-slate-500 py-4 text-center bg-slate-50 rounded-lg">
+                    All users are already members of this group.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {nonMembers.map((user) => (
+                      <div key={user.user_id} className="flex items-center justify-between p-3 border rounded-lg">
+                        <div>
+                          <p className="font-medium">{user.full_name || user.username}</p>
+                          <p className="text-sm text-slate-500">{user.email || user.username}</p>
+                        </div>
+                        <button
+                          onClick={() => handleAddMember(user.user_id)}
+                          className="btn btn-primary btn-sm gap-1"
+                        >
+                          <UserPlus className="w-4 h-4" />
+                          Add
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t bg-slate-50">
+              <button
+                onClick={() => setShowMembersModal(false)}
+                className="btn btn-secondary w-full"
+              >
+                Done
+              </button>
+            </div>
           </div>
         </div>
       )}
