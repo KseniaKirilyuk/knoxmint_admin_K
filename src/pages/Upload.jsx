@@ -35,7 +35,7 @@ export default function Upload() {
   const parseExcelDate = (value) => {
     if (!value) return null
     
-    // Handle Date objects (from cellDates: true) - use UTC to avoid timezone shift
+    // Handle Date objects directly
     if (value instanceof Date) {
       const year = value.getUTCFullYear()
       const month = String(value.getUTCMonth() + 1).padStart(2, '0')
@@ -43,22 +43,31 @@ export default function Upload() {
       return `${year}-${month}-${day}`
     }
     
-    // Handle strings like "7/23/2023" or "07/23/2023"
-    if (typeof value === 'string') {
-      // Try M/D/YYYY or MM/DD/YYYY format
-      const mdyMatch = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
-      if (mdyMatch) {
-        const [, month, day, year] = mdyMatch
-        return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
+    const str = String(value)
+    
+    // Handle full date strings like "Thu Jul 27 2023 00:00:00 GMT-0500 (Central Daylight Time)"
+    const fullDateMatch = str.match(/\w+ (\w+) (\d+) (\d{4})/)
+    if (fullDateMatch) {
+      const months = { Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06', 
+                       Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12' }
+      const [, monthName, day, year] = fullDateMatch
+      const month = months[monthName]
+      if (month) {
+        return `${year}-${month}-${day.padStart(2, '0')}`
       }
-      
-      // Try YYYY-MM-DD format
-      const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})/)
-      if (isoMatch) {
-        return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`
-      }
-      
-      return null
+    }
+    
+    // Handle M/D/YYYY or MM/DD/YYYY format
+    const mdyMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+    if (mdyMatch) {
+      const [, month, day, year] = mdyMatch
+      return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
+    }
+    
+    // Handle YYYY-MM-DD format
+    const isoMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})/)
+    if (isoMatch) {
+      return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`
     }
     
     // Handle Excel serial numbers
@@ -68,6 +77,7 @@ export default function Upload() {
         return `${date.y}-${String(date.m).padStart(2, '0')}-${String(date.d).padStart(2, '0')}`
       }
     }
+    
     return null
   }
 
