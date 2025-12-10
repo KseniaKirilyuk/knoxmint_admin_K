@@ -10,6 +10,7 @@ DROP TABLE IF EXISTS payouts CASCADE;
 DROP TABLE IF EXISTS sales_transactions CASCADE;
 DROP TABLE IF EXISTS user_contributions CASCADE;
 DROP TABLE IF EXISTS group_inventory CASCADE;
+DROP TABLE IF EXISTS coin_types CASCADE;
 DROP TABLE IF EXISTS groups CASCADE;
 DROP TABLE IF EXISTS graded_coins CASCADE;
 DROP TABLE IF EXISTS grading_batches CASCADE;
@@ -30,6 +31,26 @@ CREATE TABLE users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- COIN TYPES TABLE
+CREATE TABLE coin_types (
+    coin_type_id SERIAL PRIMARY KEY,
+    name VARCHAR(100) UNIQUE NOT NULL,
+    keywords TEXT[], -- Keywords to match in eBay titles
+    description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Insert default coin types
+INSERT INTO coin_types (name, keywords) VALUES
+    ('Morgan', ARRAY['Morgan']),
+    ('Peace', ARRAY['Peace']),
+    ('American Eagle', ARRAY['American Eagle', 'Silver Eagle']),
+    ('Liberty High Relief', ARRAY['Liberty High Relief', 'High Relief']),
+    ('Sacagawea', ARRAY['Sacagawea']),
+    ('Laser Privy', ARRAY['Laser Privy']),
+    ('Army Privy', ARRAY['Army Privy']),
+    ('Navy Privy', ARRAY['Navy Privy']);
 
 -- MINT PRODUCTS TABLE
 CREATE TABLE mint_products (
@@ -98,24 +119,26 @@ CREATE TABLE group_inventory (
     UNIQUE(group_id, graded_coin_id)
 );
 
--- USER CONTRIBUTIONS TABLE
+-- USER CONTRIBUTIONS TABLE (updated with coin_type)
 CREATE TABLE user_contributions (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(user_id),
     group_id INTEGER REFERENCES groups(group_id),
-    graded_coin_id INTEGER REFERENCES graded_coins(graded_coin_id),
+    coin_type_id INTEGER REFERENCES coin_types(coin_type_id),
     quantity INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, group_id, graded_coin_id)
+    UNIQUE(user_id, group_id, coin_type_id)
 );
 
--- SALES TRANSACTIONS TABLE
+-- SALES TRANSACTIONS TABLE (updated with coin_type)
 CREATE TABLE sales_transactions (
     transaction_id SERIAL PRIMARY KEY,
     group_id INTEGER REFERENCES groups(group_id),
+    coin_type_id INTEGER REFERENCES coin_types(coin_type_id),
     graded_coin_id INTEGER REFERENCES graded_coins(graded_coin_id),
     listing_id VARCHAR(50),
+    item_title TEXT,
     sale_date DATE NOT NULL,
     sale_price DECIMAL(10, 2) NOT NULL,
     ebay_fee DECIMAL(10, 2) DEFAULT 0,
@@ -161,7 +184,10 @@ CREATE TABLE payout_items (
 -- INDEXES
 CREATE INDEX idx_transactions_group ON sales_transactions(group_id);
 CREATE INDEX idx_transactions_date ON sales_transactions(sale_date);
+CREATE INDEX idx_transactions_coin_type ON sales_transactions(coin_type_id);
 CREATE INDEX idx_contributions_user ON user_contributions(user_id);
+CREATE INDEX idx_contributions_group ON user_contributions(group_id);
+CREATE INDEX idx_contributions_coin_type ON user_contributions(coin_type_id);
 CREATE INDEX idx_payouts_user ON payouts(user_id);
 CREATE INDEX idx_payouts_status ON payouts(status);
 `;

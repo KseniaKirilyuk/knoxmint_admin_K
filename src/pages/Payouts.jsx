@@ -18,7 +18,7 @@ export default function Payouts() {
     setLoading(true)
     try {
       const [owedRes, historyRes, groupsRes] = await Promise.all([
-        api.get(`/payouts/owed${selectedGroup ? `?groupId=${selectedGroup}` : ''}`),
+        api.get(`/payouts?action=owed${selectedGroup ? `&groupId=${selectedGroup}` : ''}`),
         api.get('/payouts?status=Paid&limit=50'),
         api.get('/groups')
       ])

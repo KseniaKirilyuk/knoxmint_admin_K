@@ -7,7 +7,8 @@ import {
   FolderKanban, 
   Upload, 
   Settings,
-  Coins
+  Coins,
+  PieChart
 } from 'lucide-react'
 
 const navigation = [
@@ -16,6 +17,7 @@ const navigation = [
   { name: 'Payouts', href: '/payouts', icon: Wallet },
   { name: 'Users', href: '/users', icon: Users },
   { name: 'Groups', href: '/groups', icon: FolderKanban },
+  { name: 'Contributions', href: '/contributions', icon: PieChart },
   { name: 'Import Data', href: '/upload', icon: Upload },
   { name: 'Settings', href: '/settings', icon: Settings },
 ]
