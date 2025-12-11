@@ -4,11 +4,10 @@ import {
   ShoppingCart, 
   Wallet, 
   Users, 
-  FolderKanban, 
+  Package, 
   Upload, 
   Settings,
-  Coins,
-  PieChart
+  Coins
 } from 'lucide-react'
 
 const navigation = [
@@ -16,9 +15,8 @@ const navigation = [
   { name: 'Sales', href: '/sales', icon: ShoppingCart },
   { name: 'Payouts', href: '/payouts', icon: Wallet },
   { name: 'Users', href: '/users', icon: Users },
-  { name: 'Groups', href: '/groups', icon: FolderKanban },
-  { name: 'Contributions', href: '/contributions', icon: PieChart },
-  { name: 'Import Data', href: '/upload', icon: Upload },
+  { name: 'Batches', href: '/batches', icon: Package },
+  { name: 'Import Sales', href: '/upload', icon: Upload },
   { name: 'Settings', href: '/settings', icon: Settings },
 ]
 

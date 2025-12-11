@@ -22,59 +22,13 @@ async function seed() {
     `, [adminPassword]);
     console.log('  ✓ Admin user created');
 
-    // Create sample users
-    const users = [
-      'nickj', 'mike2212581', 'danfromsanfran', 'Adam', 'Pointerbrother',
-      'Will', 'lross', 'Greg2', 'jho', 'linkin06', 'Jordan', 'EricL',
-      'riley', 'Jey', 'CMCW', 'Michael', 'MikeG', 'Fet'
-    ];
-
-    for (const username of users) {
-      await pool.query(`
-        INSERT INTO users (username, role)
-        VALUES ($1, 'user')
-        ON CONFLICT (username) DO NOTHING
-      `, [username]);
-    }
-    console.log('  ✓ Sample users created');
-
-    // Create mint products
-    const products = [
-      { year: 2023, design: 'Morgan', finish: 'Uncirculated', catalog: '23XE' },
-      { year: 2023, design: 'Peace', finish: 'Uncirculated', catalog: '23XH' },
-      { year: 2023, design: 'Morgan', finish: 'Proof', catalog: '23XF' },
-      { year: 2023, design: 'Peace', finish: 'Proof', catalog: '23XL' },
-      { year: 2023, design: 'Two-Coin Set', finish: 'Uncirculated', catalog: '23X2' },
-      { year: 2023, design: 'Two-Coin Set', finish: 'Reverse Proof', catalog: '23XS' }
-    ];
-
-    for (const p of products) {
-      await pool.query(`
-        INSERT INTO mint_products (year, design, finish, mint_catalog_number, metal_type, weight_oz)
-        VALUES ($1, $2, $3, $4, 'Silver', 1.0)
-        ON CONFLICT DO NOTHING
-      `, [p.year, p.design, p.finish, p.catalog]);
-    }
-    console.log('  ✓ Mint products created');
-
-    // Create groups
-    const groups = [
-      { name: 'NGC FDI', grader: 'NGC', label: 'FDI' },
-      { name: 'NGC FR', grader: 'NGC', label: 'FR' },
-      { name: 'PCGS RP FS', grader: 'PCGS', label: 'FS' },
-      { name: 'NGC RP FDI', grader: 'NGC', label: 'FDI' },
-      { name: 'PCGS PR FDI', grader: 'PCGS', label: 'FDI' },
-      { name: 'PCGS FDI', grader: 'PCGS', label: 'FDI' }
-    ];
-
-    for (const g of groups) {
-      await pool.query(`
-        INSERT INTO groups (group_name, grader, label_type, profit_share_percentage, profit_share_minimum)
-        VALUES ($1, $2, $3, 0.33, 8.00)
-        ON CONFLICT (group_name) DO NOTHING
-      `, [g.name, g.grader, g.label]);
-    }
-    console.log('  ✓ Groups created');
+    // Create sample batch
+    await pool.query(`
+      INSERT INTO batches (batch_name, ship_date, grader, status)
+      VALUES ('Sample Batch', CURRENT_DATE, 'NGC', 'Active')
+      ON CONFLICT DO NOTHING
+    `);
+    console.log('  ✓ Sample batch created');
 
     console.log('');
     console.log('✅ Database seeded successfully!');

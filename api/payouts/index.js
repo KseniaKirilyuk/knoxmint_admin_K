@@ -10,42 +10,54 @@ function verifyToken(req) {
 }
 
 async function getAmountsOwed() {
+  // Calculate amounts owed based on:
+  // 1. User contributions per batch/coin_type
+  // 2. Sales transactions per batch/coin_type
+  // 3. FIFO: earlier batches get paid first
   const result = await query(`
-    WITH user_shares AS (
+    WITH batch_order AS (
+      SELECT batch_id, ROW_NUMBER() OVER (ORDER BY ship_date ASC NULLS LAST, created_at ASC) as batch_rank
+      FROM batches
+      WHERE status = 'Active'
+    ),
+    user_shares AS (
       SELECT 
         uc.user_id,
-        uc.group_id,
+        uc.batch_id,
         uc.coin_type_id,
-        uc.quantity::decimal / NULLIF(SUM(uc.quantity) OVER (PARTITION BY uc.group_id, uc.coin_type_id), 0) as share_pct
+        uc.quantity,
+        uc.quantity::decimal / NULLIF(SUM(uc.quantity) OVER (PARTITION BY uc.batch_id, uc.coin_type_id), 0) as share_pct
       FROM user_contributions uc
     ),
     unpaid_transactions AS (
       SELECT 
         st.transaction_id,
-        st.group_id,
+        st.batch_id,
         st.coin_type_id,
-        st.profit_share
+        st.profit_share,
+        COALESCE(st.profit_share, st.net_amount - COALESCE(bc.original_price, 0)) as calculated_profit
       FROM sales_transactions st
-      LEFT JOIN payout_items pi ON st.transaction_id = pi.transaction_id
-      WHERE pi.item_id IS NULL
+      LEFT JOIN batch_coins bc ON st.batch_id = bc.batch_id AND st.coin_type_id = bc.coin_type_id
+      WHERE st.is_paid_out = false
     )
     SELECT 
       u.user_id,
       u.username,
       u.full_name,
-      g.group_id,
-      g.group_name,
-      COALESCE(SUM(ut.profit_share * us.share_pct), 0) as amount_owed,
+      b.batch_id,
+      b.batch_name,
+      bo.batch_rank,
+      COALESCE(SUM(ut.calculated_profit * us.share_pct), 0) as amount_owed,
       COUNT(DISTINCT ut.transaction_id) as transaction_count
     FROM users u
-    CROSS JOIN groups g
-    LEFT JOIN user_shares us ON u.user_id = us.user_id AND g.group_id = us.group_id
-    LEFT JOIN unpaid_transactions ut ON us.group_id = ut.group_id 
-      AND (us.coin_type_id = ut.coin_type_id OR ut.coin_type_id IS NULL)
-    WHERE us.user_id IS NOT NULL
-    GROUP BY u.user_id, u.username, u.full_name, g.group_id, g.group_name
-    HAVING COALESCE(SUM(ut.profit_share * us.share_pct), 0) > 0
-    ORDER BY g.group_name, amount_owed DESC
+    JOIN user_shares us ON u.user_id = us.user_id
+    JOIN batches b ON us.batch_id = b.batch_id
+    JOIN batch_order bo ON b.batch_id = bo.batch_id
+    LEFT JOIN unpaid_transactions ut ON us.batch_id = ut.batch_id 
+      AND us.coin_type_id = ut.coin_type_id
+    GROUP BY u.user_id, u.username, u.full_name, b.batch_id, b.batch_name, bo.batch_rank
+    HAVING COALESCE(SUM(ut.calculated_profit * us.share_pct), 0) > 0
+    ORDER BY bo.batch_rank, amount_owed DESC
   `);
   return result.rows;
 }
@@ -66,10 +78,10 @@ export default async function handler(req, res) {
       
       // Get payouts list
       let sql = `
-        SELECT p.*, u.username, u.full_name, g.group_name
+        SELECT p.*, u.username, u.full_name, b.batch_name
         FROM payouts p
         JOIN users u ON p.user_id = u.user_id
-        JOIN groups g ON p.group_id = g.group_id
+        JOIN batches b ON p.batch_id = b.batch_id
       `;
       const params = [];
 
@@ -88,15 +100,32 @@ export default async function handler(req, res) {
     if (req.method === 'POST') {
       if (user.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
       
-      const { userId, groupId, amount, paymentMethod, paymentReference, notes } = req.body;
+      const { userId, batchId, amount, paymentMethod, paymentReference, notes } = req.body;
 
       const result = await query(
-        `INSERT INTO payouts (user_id, group_id, payout_date, amount, status, payment_method, payment_reference, notes)
+        `INSERT INTO payouts (user_id, batch_id, payout_date, amount, status, payment_method, payment_reference, notes)
          VALUES ($1, $2, CURRENT_DATE, $3, 'Pending', $4, $5, $6)
          RETURNING *`,
-        [userId, groupId, amount, paymentMethod, paymentReference, notes]
+        [userId, batchId, amount, paymentMethod, paymentReference, notes]
       );
       return res.status(201).json(result.rows[0]);
+    }
+
+    if (req.method === 'PUT') {
+      if (user.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
+      
+      const { payoutId } = req.query;
+      const { status } = req.body;
+
+      if (payoutId && status) {
+        await query(
+          'UPDATE payouts SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE payout_id = $2',
+          [status, payoutId]
+        );
+        return res.json({ success: true });
+      }
+      
+      return res.status(400).json({ error: 'Payout ID and status required' });
     }
 
     res.status(405).json({ error: 'Method not allowed' });

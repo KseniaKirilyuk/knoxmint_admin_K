@@ -9,13 +9,9 @@ DROP TABLE IF EXISTS payout_items CASCADE;
 DROP TABLE IF EXISTS payouts CASCADE;
 DROP TABLE IF EXISTS sales_transactions CASCADE;
 DROP TABLE IF EXISTS user_contributions CASCADE;
-DROP TABLE IF EXISTS group_inventory CASCADE;
+DROP TABLE IF EXISTS batch_coins CASCADE;
+DROP TABLE IF EXISTS batches CASCADE;
 DROP TABLE IF EXISTS coin_types CASCADE;
-DROP TABLE IF EXISTS groups CASCADE;
-DROP TABLE IF EXISTS graded_coins CASCADE;
-DROP TABLE IF EXISTS grading_batches CASCADE;
-DROP TABLE IF EXISTS purchases CASCADE;
-DROP TABLE IF EXISTS mint_products CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
 
 -- USERS TABLE
@@ -32,126 +28,83 @@ CREATE TABLE users (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- COIN TYPES TABLE
+-- COIN TYPES TABLE (master list of coin types)
 CREATE TABLE coin_types (
     coin_type_id SERIAL PRIMARY KEY,
     name VARCHAR(100) UNIQUE NOT NULL,
-    keywords TEXT[], -- Keywords to match in eBay titles
+    short_code VARCHAR(20),
+    mint_catalog_number VARCHAR(50),
+    year INTEGER,
     description TEXT,
+    keywords TEXT[],
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Insert default coin types
-INSERT INTO coin_types (name, keywords) VALUES
-    ('Morgan', ARRAY['Morgan']),
-    ('Peace', ARRAY['Peace']),
-    ('American Eagle', ARRAY['American Eagle', 'Silver Eagle']),
-    ('Liberty High Relief', ARRAY['Liberty High Relief', 'High Relief']),
-    ('Sacagawea', ARRAY['Sacagawea']),
-    ('Laser Privy', ARRAY['Laser Privy']),
-    ('Army Privy', ARRAY['Army Privy']),
-    ('Navy Privy', ARRAY['Navy Privy']);
+INSERT INTO coin_types (name, short_code, keywords) VALUES
+    ('Sacagawea', 'SAC', ARRAY['Sacagawea']),
+    ('Laser Privy', 'LASER', ARRAY['Laser Privy', 'Laser']),
+    ('Army Privy', 'ARMY', ARRAY['Army Privy', 'Army']),
+    ('Liberty', 'LIB', ARRAY['Liberty', 'High Relief']),
+    ('Navy Privy', 'NAVY', ARRAY['Navy Privy', 'Navy']),
+    ('Morgan', 'MORG', ARRAY['Morgan']),
+    ('Peace', 'PEACE', ARRAY['Peace']),
+    ('American Eagle', 'AE', ARRAY['American Eagle', 'Silver Eagle']);
 
--- MINT PRODUCTS TABLE
-CREATE TABLE mint_products (
-    product_id SERIAL PRIMARY KEY,
-    year INTEGER NOT NULL,
-    design VARCHAR(50) NOT NULL,
-    finish VARCHAR(50) NOT NULL,
-    mint_catalog_number VARCHAR(20),
-    metal_type VARCHAR(20) DEFAULT 'Silver',
-    weight_oz DECIMAL(10, 4) DEFAULT 1.0,
-    description TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- GRADING BATCHES TABLE
-CREATE TABLE grading_batches (
+-- BATCHES TABLE (grader shipments)
+CREATE TABLE batches (
     batch_id SERIAL PRIMARY KEY,
-    grader VARCHAR(20) NOT NULL,
-    submission_date DATE,
-    return_date DATE,
-    total_grading_cost DECIMAL(12, 2),
-    coins_submitted INTEGER,
-    notes TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- GRADED COINS TABLE
-CREATE TABLE graded_coins (
-    graded_coin_id SERIAL PRIMARY KEY,
-    product_id INTEGER REFERENCES mint_products(product_id),
-    batch_id INTEGER REFERENCES grading_batches(batch_id),
-    grader VARCHAR(20) NOT NULL,
-    grade VARCHAR(10),
-    label_type VARCHAR(20),
-    quantity INTEGER NOT NULL DEFAULT 0,
-    raw_cost_per_coin DECIMAL(10, 2),
-    grading_cost_per_coin DECIMAL(10, 2),
-    total_cost_per_coin DECIMAL(10, 2),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- GROUPS TABLE
-CREATE TABLE groups (
-    group_id SERIAL PRIMARY KEY,
-    group_name VARCHAR(100) UNIQUE NOT NULL,
+    batch_name VARCHAR(100) NOT NULL,
+    ship_date DATE,
     grader VARCHAR(20),
-    label_type VARCHAR(20),
     status VARCHAR(20) DEFAULT 'Active',
-    profit_share_percentage DECIMAL(5, 4) DEFAULT 0.33,
-    profit_share_minimum DECIMAL(10, 2) DEFAULT 8.00,
-    profit_share_maximum DECIMAL(10, 2),
-    description TEXT,
+    notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- GROUP INVENTORY TABLE
-CREATE TABLE group_inventory (
+-- BATCH COINS TABLE (coins in each batch with pricing)
+CREATE TABLE batch_coins (
     id SERIAL PRIMARY KEY,
-    group_id INTEGER REFERENCES groups(group_id),
-    graded_coin_id INTEGER REFERENCES graded_coins(graded_coin_id),
-    quantity INTEGER NOT NULL DEFAULT 0,
-    cost_per_coin DECIMAL(10, 2) NOT NULL,
+    batch_id INTEGER REFERENCES batches(batch_id) ON DELETE CASCADE,
+    coin_type_id INTEGER REFERENCES coin_types(coin_type_id),
+    original_price DECIMAL(10, 2),
+    current_price DECIMAL(10, 2),
+    total_contributed INTEGER DEFAULT 0,
+    total_sold INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(group_id, graded_coin_id)
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(batch_id, coin_type_id)
 );
 
--- USER CONTRIBUTIONS TABLE (updated with coin_type)
+-- USER CONTRIBUTIONS TABLE
 CREATE TABLE user_contributions (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(user_id),
-    group_id INTEGER REFERENCES groups(group_id),
+    batch_id INTEGER REFERENCES batches(batch_id) ON DELETE CASCADE,
     coin_type_id INTEGER REFERENCES coin_types(coin_type_id),
     quantity INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, group_id, coin_type_id)
+    UNIQUE(user_id, batch_id, coin_type_id)
 );
 
--- SALES TRANSACTIONS TABLE (updated with coin_type)
+-- SALES TRANSACTIONS TABLE
 CREATE TABLE sales_transactions (
     transaction_id SERIAL PRIMARY KEY,
-    group_id INTEGER REFERENCES groups(group_id),
+    batch_id INTEGER REFERENCES batches(batch_id),
     coin_type_id INTEGER REFERENCES coin_types(coin_type_id),
-    graded_coin_id INTEGER REFERENCES graded_coins(graded_coin_id),
     listing_id VARCHAR(50),
+    order_number VARCHAR(50),
     item_title TEXT,
     sale_date DATE NOT NULL,
     sale_price DECIMAL(10, 2) NOT NULL,
+    net_amount DECIMAL(10, 2),
     ebay_fee DECIMAL(10, 2) DEFAULT 0,
-    advertising_fee DECIMAL(10, 2) DEFAULT 0,
-    shipping_cost DECIMAL(10, 2) DEFAULT 0,
-    total_payout DECIMAL(10, 2) NOT NULL,
-    coin_cost DECIMAL(10, 2) NOT NULL,
-    profit DECIMAL(10, 2) NOT NULL,
-    profit_share DECIMAL(10, 2) NOT NULL,
-    sale_type VARCHAR(20),
     quantity_sold INTEGER DEFAULT 1,
-    buyer_username VARCHAR(100),
-    notes TEXT,
+    profit DECIMAL(10, 2),
+    profit_share DECIMAL(10, 2),
+    is_paid_out BOOLEAN DEFAULT false,
     imported_from VARCHAR(50),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -160,7 +113,7 @@ CREATE TABLE sales_transactions (
 CREATE TABLE payouts (
     payout_id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(user_id),
-    group_id INTEGER REFERENCES groups(group_id),
+    batch_id INTEGER REFERENCES batches(batch_id),
     payout_date DATE NOT NULL,
     amount DECIMAL(12, 2) NOT NULL,
     status VARCHAR(20) DEFAULT 'Pending',
@@ -176,18 +129,19 @@ CREATE TABLE payout_items (
     item_id SERIAL PRIMARY KEY,
     payout_id INTEGER REFERENCES payouts(payout_id),
     transaction_id INTEGER REFERENCES sales_transactions(transaction_id),
+    coin_type_id INTEGER REFERENCES coin_types(coin_type_id),
     user_share_amount DECIMAL(10, 2) NOT NULL,
     user_share_percentage DECIMAL(10, 6) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- INDEXES
-CREATE INDEX idx_transactions_group ON sales_transactions(group_id);
-CREATE INDEX idx_transactions_date ON sales_transactions(sale_date);
-CREATE INDEX idx_transactions_coin_type ON sales_transactions(coin_type_id);
+CREATE INDEX idx_contributions_batch ON user_contributions(batch_id);
 CREATE INDEX idx_contributions_user ON user_contributions(user_id);
-CREATE INDEX idx_contributions_group ON user_contributions(group_id);
-CREATE INDEX idx_contributions_coin_type ON user_contributions(coin_type_id);
+CREATE INDEX idx_transactions_batch ON sales_transactions(batch_id);
+CREATE INDEX idx_transactions_coin_type ON sales_transactions(coin_type_id);
+CREATE INDEX idx_transactions_date ON sales_transactions(sale_date);
+CREATE INDEX idx_batch_coins_batch ON batch_coins(batch_id);
 CREATE INDEX idx_payouts_user ON payouts(user_id);
 CREATE INDEX idx_payouts_status ON payouts(status);
 `;

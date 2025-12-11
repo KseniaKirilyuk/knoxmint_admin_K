@@ -1,30 +1,30 @@
 import { useState, useEffect } from 'react'
-import { DollarSign, CheckCircle, Clock, XCircle, Filter } from 'lucide-react'
+import { DollarSign, CheckCircle, Clock, Filter, Package } from 'lucide-react'
 import api from '../lib/api'
 
 export default function Payouts() {
   const [amountsOwed, setAmountsOwed] = useState([])
   const [payoutHistory, setPayoutHistory] = useState([])
-  const [groups, setGroups] = useState([])
+  const [batches, setBatches] = useState([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('owed')
-  const [selectedGroup, setSelectedGroup] = useState('')
+  const [selectedBatch, setSelectedBatch] = useState('')
 
   useEffect(() => {
     fetchData()
-  }, [selectedGroup])
+  }, [selectedBatch])
 
   const fetchData = async () => {
     setLoading(true)
     try {
-      const [owedRes, historyRes, groupsRes] = await Promise.all([
-        api.get(`/payouts?action=owed${selectedGroup ? `&groupId=${selectedGroup}` : ''}`),
+      const [owedRes, historyRes, batchesRes] = await Promise.all([
+        api.get(`/payouts?action=owed${selectedBatch ? `&batchId=${selectedBatch}` : ''}`),
         api.get('/payouts?status=Paid&limit=50'),
-        api.get('/groups')
+        api.get('/batches')
       ])
       setAmountsOwed(owedRes.data)
       setPayoutHistory(historyRes.data)
-      setGroups(groupsRes.data)
+      setBatches(batchesRes.data)
     } catch (error) {
       console.error('Error fetching payout data:', error)
     } finally {
@@ -32,18 +32,20 @@ export default function Payouts() {
     }
   }
 
-  const handleMarkPaid = async (userId, groupId, amount) => {
+  const handleMarkPaid = async (userId, batchId, amount) => {
     try {
-      await api.post('/payouts', {
+      const result = await api.post('/payouts', {
         userId,
-        groupId,
+        batchId,
         amount,
         paymentMethod: 'Manual'
       })
-      await api.put(`/payouts/${userId}/pay`) // This would need the payout ID
+      // Mark as paid
+      await api.put(`/payouts?payoutId=${result.data.payout_id}`, { status: 'Paid' })
       fetchData()
     } catch (error) {
       console.error('Error marking as paid:', error)
+      alert('Error recording payment')
     }
   }
 
@@ -85,11 +87,11 @@ export default function Payouts() {
         <div className="card p-6">
           <div className="flex items-center gap-4">
             <div className="p-3 bg-knox-100 rounded-xl">
-              <DollarSign className="w-6 h-6 text-knox-600" />
+              <Package className="w-6 h-6 text-knox-600" />
             </div>
             <div>
-              <p className="text-sm text-slate-500">Active Groups</p>
-              <p className="text-2xl font-bold text-slate-900">{groups.filter(g => g.status === 'Active').length}</p>
+              <p className="text-sm text-slate-500">Active Batches</p>
+              <p className="text-2xl font-bold text-slate-900">{batches.filter(b => b.status === 'Active').length}</p>
             </div>
           </div>
         </div>
@@ -126,12 +128,12 @@ export default function Payouts() {
         <Filter className="w-4 h-4 text-slate-400" />
         <select
           className="input w-auto"
-          value={selectedGroup}
-          onChange={(e) => setSelectedGroup(e.target.value)}
+          value={selectedBatch}
+          onChange={(e) => setSelectedBatch(e.target.value)}
         >
-          <option value="">All Groups</option>
-          {groups.map(g => (
-            <option key={g.group_id} value={g.group_id}>{g.group_name}</option>
+          <option value="">All Batches</option>
+          {batches.map(b => (
+            <option key={b.batch_id} value={b.batch_id}>{b.batch_name}</option>
           ))}
         </select>
       </div>
@@ -147,7 +149,7 @@ export default function Payouts() {
             <thead>
               <tr>
                 <th className="table-header">User</th>
-                <th className="table-header">Group</th>
+                <th className="table-header">Batch</th>
                 <th className="table-header text-right">Transactions</th>
                 <th className="table-header text-right">Amount Owed</th>
                 <th className="table-header text-right">Actions</th>
@@ -165,13 +167,13 @@ export default function Payouts() {
                   <tr key={idx} className="hover:bg-slate-50">
                     <td className="table-cell">
                       <div>
-                        <p className="font-medium text-slate-900">{row.username}</p>
-                        <p className="text-xs text-slate-500">{row.full_name}</p>
+                        <p className="font-medium text-slate-900">{row.full_name || row.username}</p>
+                        <p className="text-xs text-slate-500">@{row.username}</p>
                       </div>
                     </td>
                     <td className="table-cell">
                       <span className="px-2 py-1 bg-knox-50 text-knox-700 rounded text-xs font-medium">
-                        {row.group_name}
+                        {row.batch_name}
                       </span>
                     </td>
                     <td className="table-cell text-right">{row.transaction_count}</td>
@@ -180,8 +182,8 @@ export default function Payouts() {
                     </td>
                     <td className="table-cell text-right">
                       <button
-                        onClick={() => handleMarkPaid(row.user_id, row.group_id, row.amount_owed)}
-                        className="btn btn-success text-xs py-1 px-3"
+                        onClick={() => handleMarkPaid(row.user_id, row.batch_id, row.amount_owed)}
+                        className="btn btn-primary text-xs py-1 px-3"
                       >
                         Mark Paid
                       </button>
@@ -199,7 +201,7 @@ export default function Payouts() {
               <tr>
                 <th className="table-header">Date</th>
                 <th className="table-header">User</th>
-                <th className="table-header">Group</th>
+                <th className="table-header">Batch</th>
                 <th className="table-header text-right">Amount</th>
                 <th className="table-header">Method</th>
                 <th className="table-header">Status</th>
@@ -220,11 +222,11 @@ export default function Payouts() {
                     </td>
                     <td className="table-cell">
                       <div>
-                        <p className="font-medium text-slate-900">{payout.username}</p>
-                        <p className="text-xs text-slate-500">{payout.full_name}</p>
+                        <p className="font-medium text-slate-900">{payout.full_name || payout.username}</p>
+                        <p className="text-xs text-slate-500">@{payout.username}</p>
                       </div>
                     </td>
-                    <td className="table-cell">{payout.group_name}</td>
+                    <td className="table-cell">{payout.batch_name}</td>
                     <td className="table-cell text-right font-medium">
                       ${parseFloat(payout.amount).toFixed(2)}
                     </td>

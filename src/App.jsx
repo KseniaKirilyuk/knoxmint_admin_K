@@ -6,8 +6,7 @@ import Dashboard from './pages/Dashboard'
 import Sales from './pages/Sales'
 import Payouts from './pages/Payouts'
 import Users from './pages/Users'
-import Groups from './pages/Groups'
-import Contributions from './pages/Contributions'
+import Batches from './pages/Batches'
 import Upload from './pages/Upload'
 import Settings from './pages/Settings'
 import { AuthProvider, useAuth } from './hooks/useAuth'
@@ -48,8 +47,7 @@ function AppRoutes() {
         <Route path="sales" element={<Sales />} />
         <Route path="payouts" element={<Payouts />} />
         <Route path="users" element={<Users />} />
-        <Route path="groups" element={<Groups />} />
-        <Route path="contributions" element={<Contributions />} />
+        <Route path="batches" element={<Batches />} />
         <Route path="upload" element={<Upload />} />
         <Route path="settings" element={<Settings />} />
       </Route>
