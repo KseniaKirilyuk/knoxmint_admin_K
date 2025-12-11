@@ -866,40 +866,6 @@ export default function Batches() {
                     </div>
                   )}
 
-                  {/* Editable Prices */}
-                  <div className="p-4 border rounded-lg">
-                    <p className="text-sm font-medium text-slate-600 mb-3">Coin Prices (optional)</p>
-                    <div className="space-y-3">
-                      {uploadData.coinTypes.map(ct => (
-                        <div key={ct} className="grid grid-cols-3 gap-3 items-center">
-                          <span className="text-sm font-medium">{ct}</span>
-                          <input
-                            type="number"
-                            step="0.01"
-                            placeholder="Original $"
-                            className="input text-sm"
-                            value={coinPrices[ct]?.original || ''}
-                            onChange={(e) => setCoinPrices({
-                              ...coinPrices,
-                              [ct]: { ...coinPrices[ct], original: e.target.value }
-                            })}
-                          />
-                          <input
-                            type="number"
-                            step="0.01"
-                            placeholder="Current $"
-                            className="input text-sm"
-                            value={coinPrices[ct]?.current || ''}
-                            onChange={(e) => setCoinPrices({
-                              ...coinPrices,
-                              [ct]: { ...coinPrices[ct], current: e.target.value }
-                            })}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
                   <div className="flex gap-3 pt-4">
                     <button onClick={resetUpload} className="btn btn-secondary flex-1">Cancel</button>
                     <button onClick={handleUpload} disabled={uploading} className="btn btn-primary flex-1">
