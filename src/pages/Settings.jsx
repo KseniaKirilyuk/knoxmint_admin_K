@@ -1,11 +1,12 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../hooks/useAuth'
-import { User, Lock, Database, Zap } from 'lucide-react'
+import { User, Lock, Database, Zap, Coins, Plus, Upload as UploadIcon, X, Edit2, Trash2, FileSpreadsheet, CheckCircle, AlertCircle } from 'lucide-react'
+import * as XLSX from 'xlsx'
 import api from '../lib/api'
 
 export default function Settings() {
   const { user } = useAuth()
-  const [activeTab, setActiveTab] = useState('profile')
+  const [activeTab, setActiveTab] = useState('coins')
   const [passwords, setPasswords] = useState({
     current: '',
     new: '',
@@ -13,6 +14,145 @@ export default function Settings() {
   })
   const [message, setMessage] = useState({ type: '', text: '' })
   const [loading, setLoading] = useState(false)
+
+  // Coin types state
+  const [coinTypes, setCoinTypes] = useState([])
+  const [loadingCoins, setLoadingCoins] = useState(true)
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [showUploadModal, setShowUploadModal] = useState(false)
+  const [editingCoin, setEditingCoin] = useState(null)
+  const [coinForm, setCoinForm] = useState({ name: '', shortCode: '', mintCatalogNumber: '', year: '', description: '' })
+  const [uploadData, setUploadData] = useState(null)
+  const [uploadResults, setUploadResults] = useState(null)
+  const [uploading, setUploading] = useState(false)
+  const [dragActive, setDragActive] = useState(false)
+  const [uploadError, setUploadError] = useState('')
+
+  useEffect(() => {
+    if (activeTab === 'coins') {
+      fetchCoinTypes()
+    }
+  }, [activeTab])
+
+  const fetchCoinTypes = async () => {
+    setLoadingCoins(true)
+    try {
+      const res = await api.get('/batches?action=coinTypes')
+      setCoinTypes(res.data)
+    } catch (error) {
+      console.error('Error fetching coin types:', error)
+    } finally {
+      setLoadingCoins(false)
+    }
+  }
+
+  const handleAddCoin = async (e) => {
+    e.preventDefault()
+    try {
+      await api.post('/batches', { action: 'addCoinType', ...coinForm })
+      setShowAddModal(false)
+      setCoinForm({ name: '', shortCode: '', mintCatalogNumber: '', year: '', description: '' })
+      fetchCoinTypes()
+    } catch (error) {
+      alert(error.response?.data?.error || 'Error adding coin type')
+    }
+  }
+
+  // File upload handlers
+  const handleDrag = useCallback((e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.type === 'dragenter' || e.type === 'dragover') setDragActive(true)
+    else if (e.type === 'dragleave') setDragActive(false)
+  }, [])
+
+  const handleDrop = useCallback((e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragActive(false)
+    if (e.dataTransfer.files?.[0]) handleFileSelect(e.dataTransfer.files[0])
+  }, [])
+
+  const handleFileSelect = async (file) => {
+    setUploadError('')
+    setUploadResults(null)
+
+    try {
+      const data = await file.arrayBuffer()
+      const workbook = XLSX.read(data, { type: 'array' })
+      const sheet = workbook.Sheets[workbook.SheetNames[0]]
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
+
+      if (rows.length < 2) {
+        setUploadError('Spreadsheet appears to be empty')
+        return
+      }
+
+      const headers = rows[0].map(h => String(h).toLowerCase().trim())
+      const nameIdx = headers.findIndex(h => h.includes('name') || h.includes('coin'))
+      const catalogIdx = headers.findIndex(h => h.includes('catalog') || h.includes('sku') || h.includes('code'))
+      const priceIdx = headers.findIndex(h => h.includes('price') || h.includes('cost'))
+
+      if (nameIdx === -1) {
+        setUploadError('Could not find coin name column')
+        return
+      }
+
+      const coins = []
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i]
+        const name = String(row[nameIdx] || '').trim()
+        if (!name) continue
+
+        coins.push({
+          name,
+          catalogNumber: catalogIdx >= 0 ? String(row[catalogIdx] || '').trim() : '',
+          price: priceIdx >= 0 ? parseFloat(row[priceIdx]) || null : null
+        })
+      }
+
+      setUploadData({ filename: file.name, coins })
+    } catch (err) {
+      setUploadError('Error parsing file: ' + err.message)
+    }
+  }
+
+  const handleUploadCoins = async () => {
+    if (!uploadData) return
+    setUploading(true)
+    setUploadError('')
+
+    let imported = 0
+    let errors = []
+
+    for (const coin of uploadData.coins) {
+      try {
+        await api.post('/batches', {
+          action: 'addCoinType',
+          name: coin.name,
+          mintCatalogNumber: coin.catalogNumber,
+          shortCode: coin.name.substring(0, 10).toUpperCase().replace(/\s+/g, '')
+        })
+        imported++
+      } catch (err) {
+        if (err.response?.data?.error?.includes('Already exists')) {
+          // Skip duplicates silently
+        } else {
+          errors.push(`${coin.name}: ${err.response?.data?.error || err.message}`)
+        }
+      }
+    }
+
+    setUploadResults({ imported, errors: errors.slice(0, 5) })
+    setUploading(false)
+    fetchCoinTypes()
+  }
+
+  const resetUpload = () => {
+    setUploadData(null)
+    setUploadResults(null)
+    setUploadError('')
+  }
 
   const handlePasswordChange = async (e) => {
     e.preventDefault()
@@ -46,9 +186,9 @@ export default function Settings() {
   }
 
   const tabs = [
+    { id: 'coins', label: 'Coin Types', icon: Coins },
     { id: 'profile', label: 'Profile', icon: User },
     { id: 'security', label: 'Security', icon: Lock },
-    { id: 'database', label: 'Database', icon: Database },
     { id: 'integrations', label: 'Integrations', icon: Zap }
   ]
 
@@ -82,6 +222,63 @@ export default function Settings() {
 
         {/* Content */}
         <div className="flex-1">
+          {activeTab === 'coins' && (
+            <div className="card p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-lg font-semibold">Coin Types</h2>
+                  <p className="text-sm text-slate-500">Manage your coin catalog</p>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => setShowUploadModal(true)} className="btn btn-secondary gap-2">
+                    <UploadIcon className="w-4 h-4" /> Upload
+                  </button>
+                  <button onClick={() => setShowAddModal(true)} className="btn btn-primary gap-2">
+                    <Plus className="w-4 h-4" /> Add Coin
+                  </button>
+                </div>
+              </div>
+
+              {loadingCoins ? (
+                <div className="flex items-center justify-center h-32">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-knox-600"></div>
+                </div>
+              ) : coinTypes.length === 0 ? (
+                <div className="text-center py-8 text-slate-500">
+                  <Coins className="w-10 h-10 mx-auto mb-3 text-slate-300" />
+                  <p>No coin types yet. Upload a spreadsheet or add manually.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr>
+                        <th className="table-header">Name</th>
+                        <th className="table-header">Code</th>
+                        <th className="table-header">Catalog #</th>
+                        <th className="table-header">Year</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {coinTypes.map((coin) => (
+                        <tr key={coin.coin_type_id} className="hover:bg-slate-50">
+                          <td className="table-cell font-medium">{coin.name}</td>
+                          <td className="table-cell">
+                            <span className="px-2 py-0.5 bg-slate-100 rounded text-xs">
+                              {coin.short_code || '-'}
+                            </span>
+                          </td>
+                          <td className="table-cell">{coin.mint_catalog_number || '-'}</td>
+                          <td className="table-cell">{coin.year || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
           {activeTab === 'profile' && (
             <div className="card p-6">
               <h2 className="text-lg font-semibold mb-6">Profile Information</h2>
@@ -183,43 +380,6 @@ export default function Settings() {
             </div>
           )}
 
-          {activeTab === 'database' && (
-            <div className="card p-6">
-              <h2 className="text-lg font-semibold mb-6">Database Management</h2>
-              <div className="space-y-6">
-                <div className="p-4 bg-slate-50 rounded-lg">
-                  <h3 className="font-medium text-slate-900 mb-2">Database Status</h3>
-                  <div className="flex items-center gap-2 text-emerald-600">
-                    <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
-                    <span className="text-sm">Connected</span>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <h3 className="font-medium text-slate-900">Data Management</h3>
-                  <div className="flex gap-3">
-                    <button className="btn btn-secondary">
-                      Export All Data
-                    </button>
-                    <button className="btn btn-secondary">
-                      Backup Database
-                    </button>
-                  </div>
-                </div>
-
-                <div className="p-4 bg-red-50 rounded-lg border border-red-200">
-                  <h3 className="font-medium text-red-800 mb-2">Danger Zone</h3>
-                  <p className="text-sm text-red-600 mb-3">
-                    These actions are irreversible. Please be careful.
-                  </p>
-                  <button className="btn btn-danger">
-                    Reset Database
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
           {activeTab === 'integrations' && (
             <div className="card p-6">
               <h2 className="text-lg font-semibold mb-6">Integrations</h2>
@@ -248,35 +408,195 @@ export default function Settings() {
                     Configure (Coming Soon)
                   </button>
                 </div>
-
-                {/* Export Integration */}
-                <div className="p-4 border rounded-lg">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
-                        <span className="text-emerald-600 font-bold text-sm">XLS</span>
-                      </div>
-                      <div>
-                        <h3 className="font-medium">Excel Export</h3>
-                        <p className="text-sm text-slate-500">Export data to Excel</p>
-                      </div>
-                    </div>
-                    <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded text-xs font-medium">
-                      Active
-                    </span>
-                  </div>
-                  <p className="text-sm text-slate-600 mb-3">
-                    Export sales, payouts, and reports to Excel format.
-                  </p>
-                  <button className="btn btn-secondary">
-                    Export Settings
-                  </button>
-                </div>
               </div>
             </div>
           )}
         </div>
       </div>
+
+      {/* Add Coin Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <h2 className="text-lg font-semibold">Add Coin Type</h2>
+              <button onClick={() => setShowAddModal(false)} className="p-2 hover:bg-slate-100 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleAddCoin} className="p-6 space-y-4">
+              <div>
+                <label className="label">Coin Name *</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="e.g., Morgan, Sacagawea"
+                  value={coinForm.name}
+                  onChange={(e) => setCoinForm({ ...coinForm, name: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Short Code</label>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="e.g., MORG"
+                    value={coinForm.shortCode}
+                    onChange={(e) => setCoinForm({ ...coinForm, shortCode: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="label">Catalog #</label>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="e.g., 25SG1"
+                    value={coinForm.mintCatalogNumber}
+                    onChange={(e) => setCoinForm({ ...coinForm, mintCatalogNumber: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="label">Year</label>
+                <input
+                  type="number"
+                  className="input"
+                  placeholder="e.g., 2025"
+                  value={coinForm.year}
+                  onChange={(e) => setCoinForm({ ...coinForm, year: e.target.value })}
+                />
+              </div>
+              <div className="flex gap-3 pt-4">
+                <button type="button" onClick={() => setShowAddModal(false)} className="btn btn-secondary flex-1">
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary flex-1">
+                  Add Coin
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Upload Coin Types Modal */}
+      {showUploadModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <h2 className="text-lg font-semibold">Upload Coin Types</h2>
+              <button onClick={() => { setShowUploadModal(false); resetUpload(); }} className="p-2 hover:bg-slate-100 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6">
+              {!uploadData && !uploadResults && (
+                <div
+                  className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${
+                    dragActive ? 'border-knox-500 bg-knox-50' : 'border-slate-300'
+                  }`}
+                  onDragEnter={handleDrag}
+                  onDragLeave={handleDrag}
+                  onDragOver={handleDrag}
+                  onDrop={handleDrop}
+                >
+                  <UploadIcon className="w-10 h-10 text-slate-400 mx-auto mb-3" />
+                  <p className="text-slate-600 mb-2">Drop your coin types spreadsheet here</p>
+                  <p className="text-sm text-slate-500 mb-4">
+                    Columns: Coin Name, Catalog # (optional), Purchase Price (optional)
+                  </p>
+                  <input
+                    type="file"
+                    id="coin-upload"
+                    className="hidden"
+                    accept=".xlsx,.xls,.csv"
+                    onChange={(e) => handleFileSelect(e.target.files[0])}
+                  />
+                  <label htmlFor="coin-upload" className="btn btn-primary cursor-pointer">
+                    Select File
+                  </label>
+                </div>
+              )}
+
+              {uploadError && (
+                <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3 text-red-700">
+                  <AlertCircle className="w-5 h-5" />
+                  <span>{uploadError}</span>
+                </div>
+              )}
+
+              {uploadData && !uploadResults && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3 p-4 bg-slate-50 rounded-lg">
+                    <FileSpreadsheet className="w-8 h-8 text-emerald-600" />
+                    <div>
+                      <p className="font-medium">{uploadData.filename}</p>
+                      <p className="text-sm text-slate-500">{uploadData.coins.length} coin types found</p>
+                    </div>
+                  </div>
+
+                  <div className="max-h-48 overflow-y-auto border rounded-lg">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 sticky top-0">
+                        <tr>
+                          <th className="text-left px-3 py-2">Name</th>
+                          <th className="text-left px-3 py-2">Catalog #</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {uploadData.coins.map((coin, i) => (
+                          <tr key={i} className="border-t">
+                            <td className="px-3 py-2">{coin.name}</td>
+                            <td className="px-3 py-2 text-slate-500">{coin.catalogNumber || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button onClick={resetUpload} className="btn btn-secondary flex-1">Cancel</button>
+                    <button onClick={handleUploadCoins} disabled={uploading} className="btn btn-primary flex-1">
+                      {uploading ? 'Uploading...' : 'Import Coins'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {uploadResults && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-emerald-100 rounded-full">
+                      <CheckCircle className="w-8 h-8 text-emerald-600" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold">Upload Complete</h3>
+                      <p className="text-slate-500">{uploadResults.imported} coin types added</p>
+                    </div>
+                  </div>
+
+                  {uploadResults.errors?.length > 0 && (
+                    <div className="p-4 bg-amber-50 rounded-lg">
+                      <p className="font-medium text-amber-800 mb-2">Warnings</p>
+                      <ul className="text-sm text-amber-700 space-y-1">
+                        {uploadResults.errors.map((err, i) => (
+                          <li key={i}>• {err}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  <button onClick={() => { setShowUploadModal(false); resetUpload(); }} className="btn btn-primary w-full">
+                    Done
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

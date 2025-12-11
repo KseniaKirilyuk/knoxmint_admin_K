@@ -188,6 +188,22 @@ export default function Batches() {
         return
       }
 
+      // Match coin columns against known coin types
+      const matchedCoins = []
+      const unmatchedCoins = []
+      
+      for (const col of coinColumns) {
+        const match = coinTypes.find(ct => 
+          ct.name.toLowerCase() === col.name.toLowerCase() ||
+          ct.short_code?.toLowerCase() === col.name.toLowerCase()
+        )
+        if (match) {
+          matchedCoins.push({ ...col, coinTypeId: match.coin_type_id, matchedName: match.name })
+        } else {
+          unmatchedCoins.push(col)
+        }
+      }
+
       // Parse contributions
       const contributions = []
       const priceRow = rows.findIndex(row => 
@@ -236,6 +252,8 @@ export default function Batches() {
         filename: file.name,
         contributions,
         coinTypes: coinColumns.map(c => c.name),
+        matchedCoins,
+        unmatchedCoins,
         memberCount: [...new Set(contributions.map(c => c.memberName))].length,
         prices: parsedPrices
       })
@@ -739,16 +757,42 @@ export default function Batches() {
                     </div>
                   </div>
 
-                  <div className="p-4 border rounded-lg">
-                    <p className="text-sm font-medium text-slate-600 mb-2">Coin Types Found</p>
-                    <div className="flex flex-wrap gap-2">
-                      {uploadData.coinTypes.map(ct => (
-                        <span key={ct} className="px-2 py-1 bg-knox-100 text-knox-700 rounded text-sm">
-                          {ct}
-                        </span>
-                      ))}
+                  {/* Matched Coins */}
+                  {uploadData.matchedCoins?.length > 0 && (
+                    <div className="p-4 border border-emerald-200 bg-emerald-50 rounded-lg">
+                      <p className="text-sm font-medium text-emerald-800 mb-2 flex items-center gap-2">
+                        <CheckCircle className="w-4 h-4" />
+                        Matched Coin Types ({uploadData.matchedCoins.length})
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {uploadData.matchedCoins.map(ct => (
+                          <span key={ct.name} className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded text-sm">
+                            {ct.name} → {ct.matchedName}
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  )}
+
+                  {/* Unmatched Coins Warning */}
+                  {uploadData.unmatchedCoins?.length > 0 && (
+                    <div className="p-4 border border-amber-200 bg-amber-50 rounded-lg">
+                      <p className="text-sm font-medium text-amber-800 mb-2 flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4" />
+                        Unmatched Coin Types ({uploadData.unmatchedCoins.length})
+                      </p>
+                      <div className="flex flex-wrap gap-2 mb-3">
+                        {uploadData.unmatchedCoins.map(ct => (
+                          <span key={ct.name} className="px-2 py-1 bg-amber-100 text-amber-700 rounded text-sm">
+                            {ct.name}
+                          </span>
+                        ))}
+                      </div>
+                      <p className="text-xs text-amber-700">
+                        These coins will be auto-created. To use existing coins, add them in Settings → Coin Types first.
+                      </p>
+                    </div>
+                  )}
 
                   {/* Editable Prices */}
                   <div className="p-4 border rounded-lg">
