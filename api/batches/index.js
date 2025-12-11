@@ -209,14 +209,14 @@ export default async function handler(req, res) {
 
       // Add new coin type
       if (action === 'addCoinType') {
-        const { name, shortCode, mintCatalogNumber, year, description } = req.body;
+        const { name, shortCode, mintCatalogNumber, originalPrice, currentPrice, description } = req.body;
         if (!name) return res.status(400).json({ error: 'Name required' });
 
         const result = await query(
-          `INSERT INTO coin_types (name, short_code, mint_catalog_number, year, description, keywords)
-           VALUES ($1, $2, $3, $4, $5, $6)
+          `INSERT INTO coin_types (name, short_code, mint_catalog_number, original_price, current_price, description, keywords)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
            RETURNING *`,
-          [name, shortCode, mintCatalogNumber, year, description, [name]]
+          [name, shortCode, mintCatalogNumber, originalPrice || null, currentPrice || null, description, [name]]
         );
         return res.status(201).json(result.rows[0]);
       }

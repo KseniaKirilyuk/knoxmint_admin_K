@@ -35,6 +35,8 @@ CREATE TABLE coin_types (
     short_code VARCHAR(20),
     mint_catalog_number VARCHAR(50),
     year INTEGER,
+    original_price DECIMAL(10, 2),
+    current_price DECIMAL(10, 2),
     description TEXT,
     keywords TEXT[],
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

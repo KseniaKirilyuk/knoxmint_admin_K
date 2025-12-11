@@ -21,7 +21,7 @@ export default function Settings() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [showUploadModal, setShowUploadModal] = useState(false)
   const [editingCoin, setEditingCoin] = useState(null)
-  const [coinForm, setCoinForm] = useState({ name: '', shortCode: '', mintCatalogNumber: '', year: '', description: '' })
+  const [coinForm, setCoinForm] = useState({ name: '', shortCode: '', mintCatalogNumber: '', originalPrice: '', currentPrice: '', description: '' })
   const [uploadData, setUploadData] = useState(null)
   const [uploadResults, setUploadResults] = useState(null)
   const [uploading, setUploading] = useState(false)
@@ -51,7 +51,7 @@ export default function Settings() {
     try {
       await api.post('/batches', { action: 'addCoinType', ...coinForm })
       setShowAddModal(false)
-      setCoinForm({ name: '', shortCode: '', mintCatalogNumber: '', year: '', description: '' })
+      setCoinForm({ name: '', shortCode: '', mintCatalogNumber: '', originalPrice: '', currentPrice: '', description: '' })
       fetchCoinTypes()
     } catch (error) {
       alert(error.response?.data?.error || 'Error adding coin type')
@@ -91,7 +91,8 @@ export default function Settings() {
       const headers = rows[0].map(h => String(h).toLowerCase().trim())
       const nameIdx = headers.findIndex(h => h.includes('name') || h.includes('coin'))
       const catalogIdx = headers.findIndex(h => h.includes('catalog') || h.includes('sku') || h.includes('code'))
-      const priceIdx = headers.findIndex(h => h.includes('price') || h.includes('cost'))
+      const originalPriceIdx = headers.findIndex(h => h.includes('original') || h.includes('purchase'))
+      const currentPriceIdx = headers.findIndex(h => h.includes('current') || (h.includes('price') && !h.includes('original') && !h.includes('purchase')))
 
       if (nameIdx === -1) {
         setUploadError('Could not find coin name column')
@@ -107,7 +108,8 @@ export default function Settings() {
         coins.push({
           name,
           catalogNumber: catalogIdx >= 0 ? String(row[catalogIdx] || '').trim() : '',
-          price: priceIdx >= 0 ? parseFloat(row[priceIdx]) || null : null
+          originalPrice: originalPriceIdx >= 0 ? parseFloat(row[originalPriceIdx]) || null : null,
+          currentPrice: currentPriceIdx >= 0 ? parseFloat(row[currentPriceIdx]) || null : null
         })
       }
 
@@ -131,6 +133,8 @@ export default function Settings() {
           action: 'addCoinType',
           name: coin.name,
           mintCatalogNumber: coin.catalogNumber,
+          originalPrice: coin.originalPrice,
+          currentPrice: coin.currentPrice,
           shortCode: coin.name.substring(0, 10).toUpperCase().replace(/\s+/g, '')
         })
         imported++
@@ -256,7 +260,8 @@ export default function Settings() {
                         <th className="table-header">Name</th>
                         <th className="table-header">Code</th>
                         <th className="table-header">Catalog #</th>
-                        <th className="table-header">Year</th>
+                        <th className="table-header text-right">Original $</th>
+                        <th className="table-header text-right">Current $</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -269,7 +274,8 @@ export default function Settings() {
                             </span>
                           </td>
                           <td className="table-cell">{coin.mint_catalog_number || '-'}</td>
-                          <td className="table-cell">{coin.year || '-'}</td>
+                          <td className="table-cell text-right">{coin.original_price ? `$${parseFloat(coin.original_price).toFixed(2)}` : '-'}</td>
+                          <td className="table-cell text-right">{coin.current_price ? `$${parseFloat(coin.current_price).toFixed(2)}` : '-'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -458,15 +464,29 @@ export default function Settings() {
                   />
                 </div>
               </div>
-              <div>
-                <label className="label">Year</label>
-                <input
-                  type="number"
-                  className="input"
-                  placeholder="e.g., 2025"
-                  value={coinForm.year}
-                  onChange={(e) => setCoinForm({ ...coinForm, year: e.target.value })}
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Original Price ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="input"
+                    placeholder="e.g., 105.00"
+                    value={coinForm.originalPrice}
+                    onChange={(e) => setCoinForm({ ...coinForm, originalPrice: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="label">Current Price ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="input"
+                    placeholder="e.g., 105.00"
+                    value={coinForm.currentPrice}
+                    onChange={(e) => setCoinForm({ ...coinForm, currentPrice: e.target.value })}
+                  />
+                </div>
               </div>
               <div className="flex gap-3 pt-4">
                 <button type="button" onClick={() => setShowAddModal(false)} className="btn btn-secondary flex-1">
@@ -543,6 +563,8 @@ export default function Settings() {
                         <tr>
                           <th className="text-left px-3 py-2">Name</th>
                           <th className="text-left px-3 py-2">Catalog #</th>
+                          <th className="text-right px-3 py-2">Original $</th>
+                          <th className="text-right px-3 py-2">Current $</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -550,6 +572,8 @@ export default function Settings() {
                           <tr key={i} className="border-t">
                             <td className="px-3 py-2">{coin.name}</td>
                             <td className="px-3 py-2 text-slate-500">{coin.catalogNumber || '-'}</td>
+                            <td className="px-3 py-2 text-right">{coin.originalPrice ? `$${coin.originalPrice}` : '-'}</td>
+                            <td className="px-3 py-2 text-right">{coin.currentPrice ? `$${coin.currentPrice}` : '-'}</td>
                           </tr>
                         ))}
                       </tbody>
