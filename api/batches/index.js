@@ -207,7 +207,7 @@ export default async function handler(req, res) {
         return res.json({ success: true });
       }
 
-      // Add new coin type
+      // Add or update coin type
       if (action === 'addCoinType') {
         const { name, shortCode, mintCatalogNumber, originalPrice, currentPrice, description } = req.body;
         if (!name) return res.status(400).json({ error: 'Name required' });
@@ -215,8 +215,14 @@ export default async function handler(req, res) {
         const result = await query(
           `INSERT INTO coin_types (name, short_code, mint_catalog_number, original_price, current_price, description, keywords)
            VALUES ($1, $2, $3, $4, $5, $6, $7)
+           ON CONFLICT (name) DO UPDATE SET
+             short_code = COALESCE(EXCLUDED.short_code, coin_types.short_code),
+             mint_catalog_number = COALESCE(EXCLUDED.mint_catalog_number, coin_types.mint_catalog_number),
+             original_price = COALESCE(EXCLUDED.original_price, coin_types.original_price),
+             current_price = COALESCE(EXCLUDED.current_price, coin_types.current_price),
+             description = COALESCE(EXCLUDED.description, coin_types.description)
            RETURNING *`,
-          [name, shortCode, mintCatalogNumber, originalPrice || null, currentPrice || null, description, [name]]
+          [name, shortCode || null, mintCatalogNumber || null, originalPrice || null, currentPrice || null, description || null, [name]]
         );
         return res.status(201).json(result.rows[0]);
       }

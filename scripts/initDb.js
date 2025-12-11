@@ -42,16 +42,7 @@ CREATE TABLE coin_types (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Insert default coin types
-INSERT INTO coin_types (name, short_code, keywords) VALUES
-    ('Sacagawea', 'SAC', ARRAY['Sacagawea']),
-    ('Laser Privy', 'LASER', ARRAY['Laser Privy', 'Laser']),
-    ('Army Privy', 'ARMY', ARRAY['Army Privy', 'Army']),
-    ('Liberty', 'LIB', ARRAY['Liberty', 'High Relief']),
-    ('Navy Privy', 'NAVY', ARRAY['Navy Privy', 'Navy']),
-    ('Morgan', 'MORG', ARRAY['Morgan']),
-    ('Peace', 'PEACE', ARRAY['Peace']),
-    ('American Eagle', 'AE', ARRAY['American Eagle', 'Silver Eagle']);
+-- No default coin types - user will upload their own catalog
 
 -- BATCHES TABLE (grader shipments)
 CREATE TABLE batches (
