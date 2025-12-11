@@ -93,7 +93,7 @@ export default async function handler(req, res) {
 
       // Upload contributions for a batch
       if (action === 'uploadContributions') {
-        const { batchId, contributions, coinPrices } = req.body;
+        const { batchId, contributions, coinPrices, coinMappings } = req.body;
         if (!batchId || !contributions) {
           return res.status(400).json({ error: 'Batch ID and contributions required' });
         }
@@ -124,21 +124,26 @@ export default async function handler(req, res) {
               userId = userResult.rows[0].user_id;
             }
 
-            // Find or create coin type
-            let coinTypeResult = await query(
-              'SELECT coin_type_id FROM coin_types WHERE LOWER(name) = LOWER($1)',
-              [coinType]
-            );
-            
+            // Check if this coin was manually mapped to an existing type
             let coinTypeId;
-            if (coinTypeResult.rows.length === 0) {
-              const newCoinType = await query(
-                'INSERT INTO coin_types (name, short_code, keywords) VALUES ($1, $2, $3) RETURNING coin_type_id',
-                [coinType, coinType.substring(0, 10).toUpperCase(), [coinType]]
-              );
-              coinTypeId = newCoinType.rows[0].coin_type_id;
+            if (coinMappings && coinMappings[coinType]) {
+              coinTypeId = coinMappings[coinType];
             } else {
-              coinTypeId = coinTypeResult.rows[0].coin_type_id;
+              // Find or create coin type
+              let coinTypeResult = await query(
+                'SELECT coin_type_id FROM coin_types WHERE LOWER(name) = LOWER($1)',
+                [coinType]
+              );
+              
+              if (coinTypeResult.rows.length === 0) {
+                const newCoinType = await query(
+                  'INSERT INTO coin_types (name, short_code, keywords) VALUES ($1, $2, $3) RETURNING coin_type_id',
+                  [coinType, coinType.substring(0, 10).toUpperCase(), [coinType]]
+                );
+                coinTypeId = newCoinType.rows[0].coin_type_id;
+              } else {
+                coinTypeId = coinTypeResult.rows[0].coin_type_id;
+              }
             }
 
             // Track totals per coin type

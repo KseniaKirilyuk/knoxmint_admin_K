@@ -29,6 +29,37 @@ export default function Batches() {
   const [dragActive, setDragActive] = useState(false)
   const [error, setError] = useState('')
   const [coinPrices, setCoinPrices] = useState({})
+  const [coinMappings, setCoinMappings] = useState({}) // Maps unmatched coin names to selected coin_type_id
+
+  // Fuzzy match helper - find best matching coin type
+  const findBestMatch = (name) => {
+    if (!coinTypes.length) return null
+    const nameLower = name.toLowerCase()
+    
+    // Score each coin type
+    const scored = coinTypes.map(ct => {
+      const ctNameLower = ct.name.toLowerCase()
+      const ctCodeLower = (ct.short_code || '').toLowerCase()
+      
+      // Exact match
+      if (ctNameLower === nameLower || ctCodeLower === nameLower) return { ct, score: 100 }
+      
+      // Contains match
+      if (ctNameLower.includes(nameLower) || nameLower.includes(ctNameLower)) return { ct, score: 80 }
+      if (ctCodeLower.includes(nameLower) || nameLower.includes(ctCodeLower)) return { ct, score: 70 }
+      
+      // Word match (e.g., "Laser" matches "Laser Privy")
+      const nameWords = nameLower.split(/\s+/)
+      const ctWords = ctNameLower.split(/\s+/)
+      const matchingWords = nameWords.filter(w => ctWords.some(cw => cw.includes(w) || w.includes(cw)))
+      if (matchingWords.length > 0) return { ct, score: 50 + matchingWords.length * 10 }
+      
+      return { ct, score: 0 }
+    })
+    
+    const best = scored.sort((a, b) => b.score - a.score)[0]
+    return best.score > 40 ? best.ct : null
+  }
 
   useEffect(() => {
     fetchData()
@@ -248,6 +279,15 @@ export default function Batches() {
         }
       }
 
+      // Initialize suggested mappings for unmatched coins
+      const initialMappings = {}
+      for (const unmatched of unmatchedCoins) {
+        const suggestion = findBestMatch(unmatched.name)
+        if (suggestion) {
+          initialMappings[unmatched.name] = suggestion.coin_type_id
+        }
+      }
+
       setUploadData({
         filename: file.name,
         contributions,
@@ -258,6 +298,7 @@ export default function Batches() {
         prices: parsedPrices
       })
       setCoinPrices(parsedPrices)
+      setCoinMappings(initialMappings)
 
     } catch (err) {
       setError('Error parsing file: ' + err.message)
@@ -273,9 +314,15 @@ export default function Batches() {
       // Map coin names to IDs for prices
       const pricesByTypeId = {}
       for (const [coinName, prices] of Object.entries(coinPrices)) {
-        const coinType = coinTypes.find(ct => ct.name.toLowerCase() === coinName.toLowerCase())
-        if (coinType) {
-          pricesByTypeId[coinType.coin_type_id] = prices
+        // Check if this coin was mapped to an existing type
+        const mappedId = coinMappings[coinName]
+        if (mappedId) {
+          pricesByTypeId[mappedId] = prices
+        } else {
+          const coinType = coinTypes.find(ct => ct.name.toLowerCase() === coinName.toLowerCase())
+          if (coinType) {
+            pricesByTypeId[coinType.coin_type_id] = prices
+          }
         }
       }
 
@@ -283,7 +330,8 @@ export default function Batches() {
         action: 'uploadContributions',
         batchId: selectedBatchId,
         contributions: uploadData.contributions,
-        coinPrices: pricesByTypeId
+        coinPrices: pricesByTypeId,
+        coinMappings // Pass mappings to server
       })
       setUploadResults(response.data)
       fetchData()
@@ -302,6 +350,7 @@ export default function Batches() {
     setUploadResults(null)
     setError('')
     setCoinPrices({})
+    setCoinMappings({})
   }
 
   const openUploadModal = (batchId) => {
@@ -774,22 +823,45 @@ export default function Batches() {
                     </div>
                   )}
 
-                  {/* Unmatched Coins Warning */}
+                  {/* Unmatched Coins - Manual Mapping */}
                   {uploadData.unmatchedCoins?.length > 0 && (
                     <div className="p-4 border border-amber-200 bg-amber-50 rounded-lg">
-                      <p className="text-sm font-medium text-amber-800 mb-2 flex items-center gap-2">
+                      <p className="text-sm font-medium text-amber-800 mb-3 flex items-center gap-2">
                         <AlertCircle className="w-4 h-4" />
-                        Unmatched Coin Types ({uploadData.unmatchedCoins.length})
+                        Map Unmatched Coin Types ({uploadData.unmatchedCoins.length})
                       </p>
-                      <div className="flex flex-wrap gap-2 mb-3">
+                      <div className="space-y-3">
                         {uploadData.unmatchedCoins.map(ct => (
-                          <span key={ct.name} className="px-2 py-1 bg-amber-100 text-amber-700 rounded text-sm">
-                            {ct.name}
-                          </span>
+                          <div key={ct.name} className="flex items-center gap-3">
+                            <span className="text-sm font-medium text-amber-800 w-28 truncate" title={ct.name}>
+                              {ct.name}
+                            </span>
+                            <span className="text-slate-400">→</span>
+                            <select
+                              className="input text-sm flex-1"
+                              value={coinMappings[ct.name] || ''}
+                              onChange={(e) => setCoinMappings({
+                                ...coinMappings,
+                                [ct.name]: e.target.value ? parseInt(e.target.value) : null
+                              })}
+                            >
+                              <option value="">+ Create new "{ct.name}"</option>
+                              <optgroup label="Existing coin types">
+                                {coinTypes.map(existing => (
+                                  <option key={existing.coin_type_id} value={existing.coin_type_id}>
+                                    {existing.name} {existing.short_code ? `(${existing.short_code})` : ''}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            </select>
+                            {coinMappings[ct.name] && (
+                              <CheckCircle className="w-5 h-5 text-emerald-500 flex-shrink-0" />
+                            )}
+                          </div>
                         ))}
                       </div>
-                      <p className="text-xs text-amber-700">
-                        These coins will be auto-created. To use existing coins, add them in Settings → Coin Types first.
+                      <p className="text-xs text-amber-700 mt-3">
+                        Select an existing coin type or leave as "Create new" to add it to your catalog.
                       </p>
                     </div>
                   )}
