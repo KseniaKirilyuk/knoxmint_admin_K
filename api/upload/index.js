@@ -19,16 +19,70 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { transactions, coinMappings } = req.body;
+    const { transactions, titleMappings } = req.body;
     
     if (!transactions || !Array.isArray(transactions)) {
       return res.status(400).json({ error: 'Transactions array required' });
     }
 
-    // Get all coin types for lookup
+    // Step 1: Create new coin types first
+    const createdCoinTypes = {};
+    let createdCount = 0;
+    
+    if (titleMappings) {
+      for (const [title, mapping] of Object.entries(titleMappings)) {
+        if (mapping.action === 'create' && mapping.newName) {
+          const originalPrice = parseFloat(mapping.cost) || 0;
+          try {
+            // Check if already exists
+            const existing = await query(
+              'SELECT * FROM coin_types WHERE LOWER(name) = LOWER($1)',
+              [mapping.newName]
+            );
+            
+            if (existing.rows.length > 0) {
+              createdCoinTypes[title] = existing.rows[0];
+            } else {
+              const result = await query(
+                `INSERT INTO coin_types (name, short_code, original_price, keywords)
+                 VALUES ($1, $2, $3, $4)
+                 RETURNING *`,
+                [
+                  mapping.newName,
+                  mapping.newName.substring(0, 15).toUpperCase().replace(/\s+/g, ''),
+                  originalPrice,
+                  [mapping.newName.toLowerCase(), title.toLowerCase().substring(0, 100)]
+                ]
+              );
+              createdCoinTypes[title] = result.rows[0];
+              createdCount++;
+            }
+          } catch (err) {
+            console.error(`Error creating coin type for "${title}":`, err);
+          }
+        }
+      }
+    }
+
+    // Step 2: Get all coin types for lookup
     const coinTypesResult = await query('SELECT * FROM coin_types');
     const coinTypes = coinTypesResult.rows;
 
+    // Build title -> coinType lookup
+    const titleToCoinType = {};
+    if (titleMappings) {
+      for (const [title, mapping] of Object.entries(titleMappings)) {
+        if (mapping.action === 'map' && mapping.coinTypeId) {
+          const ct = coinTypes.find(c => c.coin_type_id === mapping.coinTypeId);
+          if (ct) titleToCoinType[title] = ct;
+        } else if (mapping.action === 'create' && createdCoinTypes[title]) {
+          titleToCoinType[title] = createdCoinTypes[title];
+        }
+        // skip action = no entry in lookup
+      }
+    }
+
+    // Step 3: Process transactions
     let imported = 0;
     let skipped = 0;
     const errors = [];
@@ -50,30 +104,10 @@ export default async function handler(req, res) {
           }
         }
 
-        // Find coin type - check mapping first, then by name
-        let coinTypeId = null;
-        let coinCost = 0;
-        
-        if (tx.coinType) {
-          // Check if manually mapped
-          if (coinMappings && coinMappings[tx.coinType]) {
-            coinTypeId = coinMappings[tx.coinType];
-            const ct = coinTypes.find(c => c.coin_type_id === coinTypeId);
-            if (ct) {
-              coinCost = parseFloat(ct.original_price) || 0;
-            }
-          } else {
-            // Find by name match
-            const ct = coinTypes.find(c => 
-              c.name.toLowerCase() === tx.coinType.toLowerCase() ||
-              c.short_code?.toLowerCase() === tx.coinType.toLowerCase()
-            );
-            if (ct) {
-              coinTypeId = ct.coin_type_id;
-              coinCost = parseFloat(ct.original_price) || 0;
-            }
-          }
-        }
+        // Find coin type by exact title match
+        const coinType = titleToCoinType[tx.itemTitle];
+        const coinTypeId = coinType?.coin_type_id || null;
+        const coinCost = coinType ? (parseFloat(coinType.original_price) || 0) : 0;
 
         // Calculate values
         const salePrice = parseFloat(tx.salePrice) || 0;
@@ -82,22 +116,11 @@ export default async function handler(req, res) {
         const shippingCost = Math.abs(parseFloat(tx.shippingCost) || 0);
         const quantity = parseInt(tx.quantity) || 1;
         
-        // Total payout = Net from eBay (already includes fees taken out)
         const totalPayout = parseFloat(tx.totalPayout) || (salePrice - ebayFee - advertisingFee);
-        
-        // Coin cost adjusted for quantity
         const totalCoinCost = coinCost * quantity;
-        
-        // Profit = Total Payout - Coin Cost
         const profit = totalPayout - totalCoinCost;
-        
-        // Profit Share = MAX(33% of profit, $8) - only if profit > 0
         const profitShare = profit > 0 ? Math.max(0.33 * profit, 8) : 0;
-        
-        // Payout to members
         const payout = profit - profitShare;
-        
-        // Profit margin
         const profitMargin = salePrice > 0 ? (profit / salePrice) : 0;
 
         // Insert transaction
@@ -135,7 +158,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // Update batch_coins sold counts if we have coin types
+    // Update batch_coins sold counts
     await query(`
       UPDATE batch_coins bc
       SET total_sold = (
@@ -148,6 +171,7 @@ export default async function handler(req, res) {
     return res.json({
       imported,
       skipped,
+      createdCoinTypes: createdCount,
       errors: errors.slice(0, 10)
     });
 

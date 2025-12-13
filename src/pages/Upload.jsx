@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Upload as UploadIcon, FileSpreadsheet, CheckCircle, AlertCircle, X } from 'lucide-react'
+import { Upload as UploadIcon, FileSpreadsheet, CheckCircle, AlertCircle, X, Edit2, ChevronDown, ChevronUp } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import api from '../lib/api'
 
@@ -7,12 +7,12 @@ export default function Upload() {
   const [file, setFile] = useState(null)
   const [parsedData, setParsedData] = useState(null)
   const [coinTypes, setCoinTypes] = useState([])
-  const [coinMappings, setCoinMappings] = useState({})
-  const [newCoinCosts, setNewCoinCosts] = useState({})
+  const [titleMappings, setTitleMappings] = useState({}) // { title: { action: 'map'|'create'|'skip', coinTypeId?, newName?, cost? } }
   const [importing, setImporting] = useState(false)
   const [results, setResults] = useState(null)
   const [error, setError] = useState('')
   const [dragActive, setDragActive] = useState(false)
+  const [expandedTitles, setExpandedTitles] = useState({})
 
   useEffect(() => {
     fetchCoinTypes()
@@ -44,48 +44,59 @@ export default function Upload() {
     if (e.dataTransfer.files?.[0]) handleFileSelect(e.dataTransfer.files[0])
   }, [])
 
-  const extractCoinType = (title) => {
-    if (!title || title === '--') return null
-    const titleLower = title.toLowerCase()
-    
-    if (titleLower.includes('sacagawea')) return 'Sacagawea'
-    if (titleLower.includes('liberty') && titleLower.includes('gold')) return 'Liberty'
-    if (titleLower.includes('laser')) return 'Laser Privy'
-    if (titleLower.includes('army')) return 'Army Privy'
-    if (titleLower.includes('navy')) return 'Navy Privy'
-    if (titleLower.includes('morgan')) return 'Morgan'
-    if (titleLower.includes('peace')) return 'Peace'
-    if (titleLower.includes('eagle')) return 'American Eagle'
-    return null
-  }
-
   const extractGrade = (title) => {
     if (!title) return null
     const match = title.match(/(MS|PR)\d{2}/i)
     return match ? match[0].toUpperCase() : null
   }
 
-  const findBestMatch = (name) => {
-    if (!coinTypes.length || !name) return null
-    const nameLower = name.toLowerCase()
+  // Generate a suggested short name from title
+  const suggestName = (title) => {
+    if (!title || title === '--') return 'Unknown'
     
-    const scored = coinTypes.map(ct => {
+    // Extract key parts: year, mint mark, coin type, grade
+    const yearMatch = title.match(/\b(20\d{2}|19\d{2})\b/)
+    const mintMatch = title.match(/\b([WOPSDC]{1,2})\b/)
+    const gradeMatch = title.match(/(MS|PR)\d{2}/i)
+    
+    let name = ''
+    if (yearMatch) name += yearMatch[0] + ' '
+    if (mintMatch) name += mintMatch[0] + ' '
+    
+    // Find coin type keywords
+    const keywords = ['Morgan', 'Peace', 'Eagle', 'Sacagawea', 'Liberty', 'Laser', 'Army', 'Navy']
+    for (const kw of keywords) {
+      if (title.toLowerCase().includes(kw.toLowerCase())) {
+        name += kw + ' '
+        break
+      }
+    }
+    
+    if (gradeMatch) name += gradeMatch[0].toUpperCase()
+    
+    return name.trim() || title.substring(0, 40)
+  }
+
+  const findBestMatch = (title) => {
+    if (!coinTypes.length || !title) return null
+    const titleLower = title.toLowerCase()
+    
+    for (const ct of coinTypes) {
       const ctNameLower = ct.name.toLowerCase()
-      const ctCodeLower = (ct.short_code || '').toLowerCase()
-      
-      if (ctNameLower === nameLower || ctCodeLower === nameLower) return { ct, score: 100 }
-      if (ctNameLower.includes(nameLower) || nameLower.includes(ctNameLower)) return { ct, score: 80 }
-      
-      const nameWords = nameLower.split(/\s+/)
-      const ctWords = ctNameLower.split(/\s+/)
-      const matchingWords = nameWords.filter(w => ctWords.some(cw => cw.includes(w) || w.includes(cw)))
-      if (matchingWords.length > 0) return { ct, score: 50 + matchingWords.length * 10 }
-      
-      return { ct, score: 0 }
-    })
-    
-    const best = scored.sort((a, b) => b.score - a.score)[0]
-    return best.score > 40 ? best.ct : null
+      // Check if coin type name appears in title
+      if (titleLower.includes(ctNameLower)) {
+        return ct
+      }
+      // Check keywords
+      if (ct.keywords) {
+        for (const kw of ct.keywords) {
+          if (titleLower.includes(kw.toLowerCase())) {
+            return ct
+          }
+        }
+      }
+    }
+    return null
   }
 
   const handleFileSelect = async (selectedFile) => {
@@ -108,7 +119,7 @@ export default function Upload() {
       const sheet = workbook.Sheets[workbook.SheetNames[0]]
       const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
 
-      // Find header row (look for "Type" column)
+      // Find header row
       let headerRowIdx = 0
       for (let i = 0; i < Math.min(20, rows.length); i++) {
         const row = rows[i].map(c => String(c).toLowerCase())
@@ -120,7 +131,6 @@ export default function Upload() {
 
       const headers = rows[headerRowIdx].map(h => String(h).toLowerCase().trim())
       
-      // Find column indices
       const findCol = (patterns) => headers.findIndex(h => patterns.some(p => h.includes(p)))
       
       const typeCol = findCol(['type'])
@@ -133,8 +143,9 @@ export default function Upload() {
       const grossCol = findCol(['gross transaction amount'])
       const feeFixedCol = findCol(['final value fee - fixed'])
       const feeVarCol = findCol(['final value fee - variable'])
+      const descCol = headers.indexOf('description')
 
-      // Parse orders
+      // Parse all rows
       const orders = []
       const shippingByOrder = {}
       const adsByOrder = {}
@@ -145,14 +156,13 @@ export default function Upload() {
         const orderNumber = String(row[orderCol] || '').trim()
 
         if (type === 'Order') {
-          const title = String(row[titleCol] || '')
-          const coinType = extractCoinType(title)
+          const title = String(row[titleCol] || '').trim()
+          if (!title || title === '--') continue
           
           orders.push({
             orderNumber,
             listingId: String(row[itemIdCol] || ''),
             itemTitle: title,
-            coinType,
             grade: extractGrade(title),
             saleDate: row[dateCol] ? new Date(row[dateCol]).toISOString().split('T')[0] : null,
             salePrice: parseFloat(row[grossCol]) || 0,
@@ -163,51 +173,78 @@ export default function Upload() {
         } else if (type === 'Shipping label' && orderNumber) {
           shippingByOrder[orderNumber] = (shippingByOrder[orderNumber] || 0) + Math.abs(parseFloat(row[netAmountCol]) || 0)
         } else if (type === 'Other fee' && orderNumber) {
-          const desc = String(row[headers.indexOf('description')] || '')
+          const desc = String(row[descCol] || '')
           if (desc.toLowerCase().includes('promoted')) {
             adsByOrder[orderNumber] = (adsByOrder[orderNumber] || 0) + Math.abs(parseFloat(row[netAmountCol]) || 0)
           }
         }
       }
 
-      // Merge shipping and ads into orders
+      // Merge shipping and ads
       orders.forEach(order => {
         order.shippingCost = shippingByOrder[order.orderNumber] || 0
         order.advertisingFee = adsByOrder[order.orderNumber] || 0
-        // Adjust total payout to add back shipping (since we track it separately)
         order.totalPayout = order.totalPayout + order.shippingCost
       })
 
-      // Find unique coin types and match to existing
-      const uniqueTypes = [...new Set(orders.map(o => o.coinType).filter(Boolean))]
-      const matched = []
-      const unmatched = []
-      const initialMappings = {}
+      // Get unique titles with counts and total revenue
+      const titleStats = {}
+      orders.forEach(order => {
+        if (!titleStats[order.itemTitle]) {
+          titleStats[order.itemTitle] = { count: 0, revenue: 0, sample: order }
+        }
+        titleStats[order.itemTitle].count += order.quantity
+        titleStats[order.itemTitle].revenue += order.salePrice
+      })
 
-      uniqueTypes.forEach(type => {
-        const match = findBestMatch(type)
+      // Sort by count descending
+      const uniqueTitles = Object.entries(titleStats)
+        .sort((a, b) => b[1].count - a[1].count)
+        .map(([title, stats]) => ({
+          title,
+          count: stats.count,
+          revenue: stats.revenue,
+          sample: stats.sample
+        }))
+
+      // Initialize mappings with best guesses
+      const initialMappings = {}
+      uniqueTitles.forEach(({ title }) => {
+        const match = findBestMatch(title)
         if (match) {
-          matched.push({ name: type, matchedId: match.coin_type_id, matchedName: match.name })
-          initialMappings[type] = match.coin_type_id
+          initialMappings[title] = {
+            action: 'map',
+            coinTypeId: match.coin_type_id,
+            matchedName: match.name
+          }
         } else {
-          unmatched.push({ name: type })
+          initialMappings[title] = {
+            action: 'create',
+            newName: suggestName(title),
+            cost: ''
+          }
         }
       })
 
       setParsedData({
         filename: selectedFile.name,
         orders,
+        uniqueTitles,
         totalOrders: orders.length,
-        totalRevenue: orders.reduce((sum, o) => sum + o.salePrice, 0),
-        matched,
-        unmatched,
-        uniqueTypes
+        totalRevenue: orders.reduce((sum, o) => sum + o.salePrice, 0)
       })
-      setCoinMappings(initialMappings)
+      setTitleMappings(initialMappings)
 
     } catch (err) {
       setError('Error parsing file: ' + err.message)
     }
+  }
+
+  const updateMapping = (title, updates) => {
+    setTitleMappings(prev => ({
+      ...prev,
+      [title]: { ...prev[title], ...updates }
+    }))
   }
 
   const handleImport = async () => {
@@ -218,11 +255,9 @@ export default function Upload() {
     try {
       const response = await api.post('/upload', {
         transactions: parsedData.orders,
-        coinMappings,
-        newCoinCosts
+        titleMappings
       })
       setResults(response.data)
-      // Refresh coin types in case new ones were created
       fetchCoinTypes()
     } catch (err) {
       setError(err.response?.data?.error || 'Import failed')
@@ -236,15 +271,23 @@ export default function Upload() {
     setParsedData(null)
     setResults(null)
     setError('')
-    setCoinMappings({})
-    setNewCoinCosts({})
+    setTitleMappings({})
+    setExpandedTitles({})
   }
 
+  const toggleExpand = (title) => {
+    setExpandedTitles(prev => ({ ...prev, [title]: !prev[title] }))
+  }
+
+  const mappedCount = Object.values(titleMappings).filter(m => m.action === 'map').length
+  const createCount = Object.values(titleMappings).filter(m => m.action === 'create').length
+  const skipCount = Object.values(titleMappings).filter(m => m.action === 'skip').length
+
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-5xl mx-auto space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Import eBay Sales</h1>
-        <p className="text-slate-500 mt-1">Upload your eBay transaction report (CSV or Excel)</p>
+        <p className="text-slate-500 mt-1">Upload your eBay transaction report and map items to coin types</p>
       </div>
 
       {!parsedData && !results && (
@@ -297,126 +340,164 @@ export default function Upload() {
               <div>
                 <p className="font-medium text-slate-900">{parsedData.filename}</p>
                 <p className="text-sm text-slate-500">
-                  {parsedData.totalOrders} orders • ${parsedData.totalRevenue.toLocaleString()} revenue
+                  {parsedData.totalOrders} orders • ${parsedData.totalRevenue.toLocaleString()} revenue • {parsedData.uniqueTitles.length} unique items
                 </p>
               </div>
             </div>
             <button onClick={reset} className="btn btn-secondary">Choose Different File</button>
           </div>
 
-          {/* Matched Coins */}
-          {parsedData.matched.length > 0 && (
-            <div className="card p-4 border-emerald-200 bg-emerald-50">
-              <p className="text-sm font-medium text-emerald-800 mb-2 flex items-center gap-2">
-                <CheckCircle className="w-4 h-4" />
-                Matched Coin Types ({parsedData.matched.length})
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {parsedData.matched.map(ct => (
-                  <span key={ct.name} className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded text-sm">
-                    {ct.name} → {ct.matchedName}
-                  </span>
-                ))}
-              </div>
+          {/* Summary */}
+          <div className="flex gap-4">
+            <div className="px-4 py-2 bg-emerald-50 rounded-lg">
+              <span className="text-emerald-700 font-medium">{mappedCount}</span>
+              <span className="text-emerald-600 text-sm ml-1">mapped</span>
             </div>
-          )}
-
-          {/* Unmatched Coins */}
-          {parsedData.unmatched.length > 0 && (
-            <div className="card p-4 border-amber-200 bg-amber-50">
-              <p className="text-sm font-medium text-amber-800 mb-3 flex items-center gap-2">
-                <AlertCircle className="w-4 h-4" />
-                Map Unmatched Coin Types ({parsedData.unmatched.length})
-              </p>
-              <div className="space-y-3">
-                {parsedData.unmatched.map(ct => (
-                  <div key={ct.name} className="flex items-center gap-3">
-                    <span className="text-sm font-medium text-amber-800 w-32 truncate" title={ct.name}>{ct.name}</span>
-                    <span className="text-slate-400">→</span>
-                    <select
-                      className="input text-sm w-48"
-                      value={coinMappings[ct.name] || 'create'}
-                      onChange={(e) => {
-                        const val = e.target.value
-                        if (val === 'skip' || val === 'create') {
-                          setCoinMappings({ ...coinMappings, [ct.name]: val })
-                        } else {
-                          setCoinMappings({ ...coinMappings, [ct.name]: parseInt(val) })
-                        }
-                      }}
-                    >
-                      <option value="create">+ Create new coin type</option>
-                      <option value="skip">Skip (no cost)</option>
-                      <optgroup label="Existing coin types">
-                        {coinTypes.map(existing => (
-                          <option key={existing.coin_type_id} value={existing.coin_type_id}>
-                            {existing.name} (${existing.original_price || 0})
-                          </option>
-                        ))}
-                      </optgroup>
-                    </select>
-                    {coinMappings[ct.name] === 'create' || !coinMappings[ct.name] ? (
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-slate-500">Cost:</span>
-                        <div className="relative">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
-                          <input
-                            type="number"
-                            step="0.01"
-                            placeholder="0.00"
-                            className="input text-sm w-28 pl-7"
-                            value={newCoinCosts[ct.name] || ''}
-                            onChange={(e) => setNewCoinCosts({
-                              ...newCoinCosts,
-                              [ct.name]: e.target.value
-                            })}
-                          />
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-              <p className="text-xs text-amber-700 mt-3">
-                New coin types will be added to your catalog with the cost you enter.
-              </p>
+            <div className="px-4 py-2 bg-knox-50 rounded-lg">
+              <span className="text-knox-700 font-medium">{createCount}</span>
+              <span className="text-knox-600 text-sm ml-1">new coins</span>
             </div>
-          )}
+            <div className="px-4 py-2 bg-slate-100 rounded-lg">
+              <span className="text-slate-700 font-medium">{skipCount}</span>
+              <span className="text-slate-600 text-sm ml-1">skipped</span>
+            </div>
+          </div>
 
-          {/* Preview Table */}
+          {/* Title Mappings */}
           <div className="card overflow-hidden">
             <div className="px-4 py-3 border-b bg-slate-50">
-              <h3 className="font-medium">Preview (first 10 orders)</h3>
+              <h3 className="font-medium">Map Items to Coin Types</h3>
+              <p className="text-sm text-slate-500">Review each unique item and assign to existing coin type or create new</p>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-slate-50">
-                    <th className="px-3 py-2 text-left">Date</th>
-                    <th className="px-3 py-2 text-left">Type</th>
-                    <th className="px-3 py-2 text-right">Price</th>
-                    <th className="px-3 py-2 text-right">Fees</th>
-                    <th className="px-3 py-2 text-right">Ship</th>
-                    <th className="px-3 py-2 text-right">Payout</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {parsedData.orders.slice(0, 10).map((order, i) => (
-                    <tr key={i} className="border-t">
-                      <td className="px-3 py-2">{order.saleDate}</td>
-                      <td className="px-3 py-2">
-                        <span className="px-2 py-0.5 bg-knox-50 text-knox-700 rounded text-xs">
-                          {order.coinType || 'Unknown'}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-right">${order.salePrice.toFixed(2)}</td>
-                      <td className="px-3 py-2 text-right text-red-600">${Math.abs(order.ebayFee).toFixed(2)}</td>
-                      <td className="px-3 py-2 text-right">${order.shippingCost.toFixed(2)}</td>
-                      <td className="px-3 py-2 text-right font-medium">${order.totalPayout.toFixed(2)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            
+            <div className="divide-y">
+              {parsedData.uniqueTitles.map(({ title, count, revenue }) => {
+                const mapping = titleMappings[title] || {}
+                const isExpanded = expandedTitles[title]
+                
+                return (
+                  <div key={title} className="p-4">
+                    {/* Title Row */}
+                    <div className="flex items-start gap-3">
+                      <button 
+                        onClick={() => toggleExpand(title)}
+                        className="p-1 text-slate-400 hover:text-slate-600 mt-0.5"
+                      >
+                        {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                      </button>
+                      
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-slate-900 truncate" title={title}>{title}</p>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {count} sold • ${revenue.toLocaleString()} revenue
+                        </p>
+                      </div>
+
+                      {/* Action indicator */}
+                      <div className="flex-shrink-0">
+                        {mapping.action === 'map' && (
+                          <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded text-xs">
+                            → {mapping.matchedName}
+                          </span>
+                        )}
+                        {mapping.action === 'create' && (
+                          <span className="px-2 py-1 bg-knox-100 text-knox-700 rounded text-xs">
+                            + {mapping.newName || 'New'}
+                          </span>
+                        )}
+                        {mapping.action === 'skip' && (
+                          <span className="px-2 py-1 bg-slate-100 text-slate-500 rounded text-xs">
+                            Skip
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Expanded Options */}
+                    {isExpanded && (
+                      <div className="mt-4 ml-8 p-4 bg-slate-50 rounded-lg space-y-4">
+                        {/* Action Select */}
+                        <div className="flex items-center gap-4">
+                          <label className="text-sm text-slate-600 w-20">Action:</label>
+                          <select
+                            className="input text-sm w-48"
+                            value={mapping.action || 'create'}
+                            onChange={(e) => {
+                              const action = e.target.value
+                              if (action === 'map') {
+                                updateMapping(title, { action: 'map', coinTypeId: null, matchedName: null })
+                              } else if (action === 'create') {
+                                updateMapping(title, { action: 'create', newName: suggestName(title), cost: '' })
+                              } else {
+                                updateMapping(title, { action: 'skip' })
+                              }
+                            }}
+                          >
+                            <option value="create">Create new coin type</option>
+                            <option value="map">Map to existing</option>
+                            <option value="skip">Skip (no cost)</option>
+                          </select>
+                        </div>
+
+                        {/* Map to existing */}
+                        {mapping.action === 'map' && (
+                          <div className="flex items-center gap-4">
+                            <label className="text-sm text-slate-600 w-20">Coin Type:</label>
+                            <select
+                              className="input text-sm flex-1"
+                              value={mapping.coinTypeId || ''}
+                              onChange={(e) => {
+                                const ct = coinTypes.find(c => c.coin_type_id === parseInt(e.target.value))
+                                updateMapping(title, { 
+                                  coinTypeId: parseInt(e.target.value),
+                                  matchedName: ct?.name 
+                                })
+                              }}
+                            >
+                              <option value="">Select coin type...</option>
+                              {coinTypes.map(ct => (
+                                <option key={ct.coin_type_id} value={ct.coin_type_id}>
+                                  {ct.name} - ${ct.original_price || 0}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {/* Create new */}
+                        {mapping.action === 'create' && (
+                          <>
+                            <div className="flex items-center gap-4">
+                              <label className="text-sm text-slate-600 w-20">Name:</label>
+                              <input
+                                type="text"
+                                className="input text-sm flex-1"
+                                value={mapping.newName || ''}
+                                onChange={(e) => updateMapping(title, { newName: e.target.value })}
+                                placeholder="Coin type name"
+                              />
+                            </div>
+                            <div className="flex items-center gap-4">
+                              <label className="text-sm text-slate-600 w-20">Cost:</label>
+                              <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  className="input text-sm w-32 pl-7"
+                                  value={mapping.cost || ''}
+                                  onChange={(e) => updateMapping(title, { cost: e.target.value })}
+                                  placeholder="0.00"
+                                />
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </div>
 
@@ -449,7 +530,7 @@ export default function Upload() {
                 <p className="text-2xl font-bold text-emerald-700">{results.imported}</p>
               </div>
               <div className="p-4 bg-slate-50 rounded-lg">
-                <p className="text-sm text-slate-600 font-medium">Skipped (duplicates)</p>
+                <p className="text-sm text-slate-600 font-medium">Skipped</p>
                 <p className="text-2xl font-bold text-slate-700">{results.skipped}</p>
               </div>
               {results.createdCoinTypes > 0 && (
