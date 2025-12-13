@@ -8,6 +8,7 @@ export default function Upload() {
   const [parsedData, setParsedData] = useState(null)
   const [coinTypes, setCoinTypes] = useState([])
   const [titleMappings, setTitleMappings] = useState({}) // { title: { action: 'map'|'create'|'skip', coinTypeId?, newName?, cost? } }
+  const [includedTitles, setIncludedTitles] = useState({}) // { title: true/false }
   const [importing, setImporting] = useState(false)
   const [results, setResults] = useState(null)
   const [error, setError] = useState('')
@@ -48,6 +49,18 @@ export default function Upload() {
     if (!title) return null
     const match = title.match(/(MS|PR)\d{2}/i)
     return match ? match[0].toUpperCase() : null
+  }
+
+  // Check if item title looks like a coin
+  const looksLikeCoin = (title) => {
+    if (!title) return false
+    const titleLower = title.toLowerCase()
+    const coinKeywords = [
+      'morgan', 'peace', 'eagle', 'sacagawea', 'liberty', 'laser', 'army', 'navy',
+      'dollar', 'coin', 'silver', 'gold', 'pcgs', 'ngc', 'ms69', 'ms70', 'pr69', 'pr70',
+      'proof', 'mint', 'commemorative', 'bullion', 'privy', 'first strike', 'first day'
+    ]
+    return coinKeywords.some(kw => titleLower.includes(kw))
   }
 
   // Generate a suggested short name from title
@@ -209,7 +222,13 @@ export default function Upload() {
 
       // Initialize mappings with best guesses
       const initialMappings = {}
+      const initialIncluded = {}
+      
       uniqueTitles.forEach(({ title }) => {
+        // Auto-include if looks like a coin
+        const isCoin = looksLikeCoin(title)
+        initialIncluded[title] = isCoin
+        
         const match = findBestMatch(title)
         if (match) {
           initialMappings[title] = {
@@ -234,6 +253,7 @@ export default function Upload() {
         totalRevenue: orders.reduce((sum, o) => sum + o.salePrice, 0)
       })
       setTitleMappings(initialMappings)
+      setIncludedTitles(initialIncluded)
 
     } catch (err) {
       setError('Error parsing file: ' + err.message)
@@ -253,9 +273,20 @@ export default function Upload() {
     setError('')
 
     try {
+      // Filter orders to only include checked items
+      const filteredOrders = parsedData.orders.filter(order => includedTitles[order.itemTitle])
+      
+      // Filter titleMappings to only include checked items
+      const filteredMappings = {}
+      for (const [title, mapping] of Object.entries(titleMappings)) {
+        if (includedTitles[title]) {
+          filteredMappings[title] = mapping
+        }
+      }
+
       const response = await api.post('/upload', {
-        transactions: parsedData.orders,
-        titleMappings
+        transactions: filteredOrders,
+        titleMappings: filteredMappings
       })
       setResults(response.data)
       fetchCoinTypes()
@@ -272,6 +303,7 @@ export default function Upload() {
     setResults(null)
     setError('')
     setTitleMappings({})
+    setIncludedTitles({})
     setExpandedTitles({})
   }
 
@@ -279,9 +311,10 @@ export default function Upload() {
     setExpandedTitles(prev => ({ ...prev, [title]: !prev[title] }))
   }
 
-  const mappedCount = Object.values(titleMappings).filter(m => m.action === 'map').length
-  const createCount = Object.values(titleMappings).filter(m => m.action === 'create').length
-  const skipCount = Object.values(titleMappings).filter(m => m.action === 'skip').length
+  // Count only included items
+  const includedCount = Object.values(includedTitles).filter(Boolean).length
+  const excludedCount = parsedData?.uniqueTitles?.length - includedCount || 0
+  const includedOrders = parsedData?.orders?.filter(o => includedTitles[o.itemTitle])?.length || 0
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -350,38 +383,67 @@ export default function Upload() {
           {/* Summary */}
           <div className="flex gap-4">
             <div className="px-4 py-2 bg-emerald-50 rounded-lg">
-              <span className="text-emerald-700 font-medium">{mappedCount}</span>
-              <span className="text-emerald-600 text-sm ml-1">mapped</span>
-            </div>
-            <div className="px-4 py-2 bg-knox-50 rounded-lg">
-              <span className="text-knox-700 font-medium">{createCount}</span>
-              <span className="text-knox-600 text-sm ml-1">new coins</span>
+              <span className="text-emerald-700 font-medium">{includedCount}</span>
+              <span className="text-emerald-600 text-sm ml-1">included</span>
             </div>
             <div className="px-4 py-2 bg-slate-100 rounded-lg">
-              <span className="text-slate-700 font-medium">{skipCount}</span>
-              <span className="text-slate-600 text-sm ml-1">skipped</span>
+              <span className="text-slate-700 font-medium">{excludedCount}</span>
+              <span className="text-slate-600 text-sm ml-1">excluded</span>
+            </div>
+            <div className="px-4 py-2 bg-knox-50 rounded-lg">
+              <span className="text-knox-700 font-medium">{includedOrders}</span>
+              <span className="text-knox-600 text-sm ml-1">orders to import</span>
             </div>
           </div>
 
           {/* Title Mappings */}
           <div className="card overflow-hidden">
-            <div className="px-4 py-3 border-b bg-slate-50">
-              <h3 className="font-medium">Map Items to Coin Types</h3>
-              <p className="text-sm text-slate-500">Review each unique item and assign to existing coin type or create new</p>
+            <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
+              <div>
+                <h3 className="font-medium">Select Items to Import</h3>
+                <p className="text-sm text-slate-500">Uncheck non-coin items (auto-detected). Then configure coin type mapping.</p>
+              </div>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => setIncludedTitles(Object.fromEntries(parsedData.uniqueTitles.map(t => [t.title, true])))}
+                  className="text-xs text-knox-600 hover:underline"
+                >
+                  Select all
+                </button>
+                <span className="text-slate-300">|</span>
+                <button 
+                  onClick={() => setIncludedTitles(Object.fromEntries(parsedData.uniqueTitles.map(t => [t.title, false])))}
+                  className="text-xs text-slate-500 hover:underline"
+                >
+                  Clear all
+                </button>
+              </div>
             </div>
             
             <div className="divide-y">
               {parsedData.uniqueTitles.map(({ title, count, revenue }) => {
                 const mapping = titleMappings[title] || {}
                 const isExpanded = expandedTitles[title]
+                const isIncluded = includedTitles[title]
                 
                 return (
-                  <div key={title} className="p-4">
+                  <div key={title} className={`p-4 ${!isIncluded ? 'bg-slate-50 opacity-60' : ''}`}>
                     {/* Title Row */}
                     <div className="flex items-start gap-3">
+                      {/* Checkbox */}
+                      <label className="flex items-center mt-0.5">
+                        <input
+                          type="checkbox"
+                          checked={isIncluded || false}
+                          onChange={(e) => setIncludedTitles(prev => ({ ...prev, [title]: e.target.checked }))}
+                          className="w-4 h-4 text-knox-600 border-slate-300 rounded focus:ring-knox-500"
+                        />
+                      </label>
+                      
                       <button 
                         onClick={() => toggleExpand(title)}
                         className="p-1 text-slate-400 hover:text-slate-600 mt-0.5"
+                        disabled={!isIncluded}
                       >
                         {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                       </button>
@@ -394,27 +456,34 @@ export default function Upload() {
                       </div>
 
                       {/* Action indicator */}
-                      <div className="flex-shrink-0">
-                        {mapping.action === 'map' && (
-                          <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded text-xs">
-                            → {mapping.matchedName}
-                          </span>
-                        )}
-                        {mapping.action === 'create' && (
-                          <span className="px-2 py-1 bg-knox-100 text-knox-700 rounded text-xs">
-                            + {mapping.newName || 'New'}
-                          </span>
-                        )}
-                        {mapping.action === 'skip' && (
-                          <span className="px-2 py-1 bg-slate-100 text-slate-500 rounded text-xs">
-                            Skip
-                          </span>
-                        )}
-                      </div>
+                      {isIncluded && (
+                        <div className="flex-shrink-0">
+                          {mapping.action === 'map' && (
+                            <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded text-xs">
+                              → {mapping.matchedName}
+                            </span>
+                          )}
+                          {mapping.action === 'create' && (
+                            <span className="px-2 py-1 bg-knox-100 text-knox-700 rounded text-xs">
+                              + {mapping.newName || 'New'}
+                            </span>
+                          )}
+                          {mapping.action === 'skip' && (
+                            <span className="px-2 py-1 bg-slate-100 text-slate-500 rounded text-xs">
+                              No cost
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {!isIncluded && (
+                        <span className="px-2 py-1 bg-red-50 text-red-500 rounded text-xs">
+                          Excluded
+                        </span>
+                      )}
                     </div>
 
-                    {/* Expanded Options */}
-                    {isExpanded && (
+                    {/* Expanded Options - only show if included */}
+                    {isExpanded && isIncluded && (
                       <div className="mt-4 ml-8 p-4 bg-slate-50 rounded-lg space-y-4">
                         {/* Action Select */}
                         <div className="flex items-center gap-4">
@@ -504,8 +573,12 @@ export default function Upload() {
           {/* Import Button */}
           <div className="flex justify-end gap-3">
             <button onClick={reset} className="btn btn-secondary">Cancel</button>
-            <button onClick={handleImport} disabled={importing} className="btn btn-primary">
-              {importing ? 'Importing...' : `Import ${parsedData.totalOrders} Orders`}
+            <button 
+              onClick={handleImport} 
+              disabled={importing || includedOrders === 0} 
+              className="btn btn-primary"
+            >
+              {importing ? 'Importing...' : `Import ${includedOrders} Orders`}
             </button>
           </div>
         </div>
