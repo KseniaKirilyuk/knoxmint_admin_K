@@ -15,22 +15,30 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === 'GET') {
-      const { groupId, startDate, endDate, limit = 100, offset = 0 } = req.query;
+      const { batchId, coinTypeId, startDate, endDate, limit = 50, offset = 0 } = req.query;
       
       let sql = `
-        SELECT st.*, g.group_name, gc.grade, gc.label_type as coin_label, mp.design, mp.mint_catalog_number
+        SELECT 
+          st.*,
+          b.batch_name,
+          ct.name as coin_type_name,
+          ct.short_code
         FROM sales_transactions st
-        JOIN groups g ON st.group_id = g.group_id
-        LEFT JOIN graded_coins gc ON st.graded_coin_id = gc.graded_coin_id
-        LEFT JOIN mint_products mp ON gc.product_id = mp.product_id
+        LEFT JOIN batches b ON st.batch_id = b.batch_id
+        LEFT JOIN coin_types ct ON st.coin_type_id = ct.coin_type_id
         WHERE 1=1
       `;
       const params = [];
       let paramIndex = 1;
 
-      if (groupId) {
-        sql += ` AND st.group_id = $${paramIndex}`;
-        params.push(groupId);
+      if (batchId) {
+        sql += ` AND st.batch_id = $${paramIndex}`;
+        params.push(batchId);
+        paramIndex++;
+      }
+      if (coinTypeId) {
+        sql += ` AND st.coin_type_id = $${paramIndex}`;
+        params.push(coinTypeId);
         paramIndex++;
       }
       if (startDate) {
@@ -48,42 +56,66 @@ export default async function handler(req, res) {
       params.push(parseInt(limit), parseInt(offset));
 
       const result = await query(sql, params);
-      const countResult = await query('SELECT COUNT(*) as total FROM sales_transactions');
+      
+      // Get total count with same filters
+      let countSql = 'SELECT COUNT(*) as total FROM sales_transactions WHERE 1=1';
+      const countParams = [];
+      let countParamIndex = 1;
+      
+      if (batchId) {
+        countSql += ` AND batch_id = $${countParamIndex}`;
+        countParams.push(batchId);
+        countParamIndex++;
+      }
+      if (coinTypeId) {
+        countSql += ` AND coin_type_id = $${countParamIndex}`;
+        countParams.push(coinTypeId);
+        countParamIndex++;
+      }
+      if (startDate) {
+        countSql += ` AND sale_date >= $${countParamIndex}`;
+        countParams.push(startDate);
+        countParamIndex++;
+      }
+      if (endDate) {
+        countSql += ` AND sale_date <= $${countParamIndex}`;
+        countParams.push(endDate);
+        countParamIndex++;
+      }
+      
+      const countResult = await query(countSql, countParams);
+
+      // Get summary stats
+      const summaryResult = await query(`
+        SELECT 
+          COUNT(*) as total_transactions,
+          COALESCE(SUM(sale_price), 0) as total_revenue,
+          COALESCE(SUM(profit), 0) as total_profit,
+          COALESCE(SUM(profit_share), 0) as total_profit_share,
+          COALESCE(SUM(payout), 0) as total_payout,
+          COALESCE(SUM(quantity_sold), 0) as total_coins_sold
+        FROM sales_transactions
+      `);
 
       return res.json({
         transactions: result.rows,
         total: parseInt(countResult.rows[0].total),
         limit: parseInt(limit),
-        offset: parseInt(offset)
+        offset: parseInt(offset),
+        summary: summaryResult.rows[0]
       });
     }
 
-    if (req.method === 'POST') {
+    if (req.method === 'DELETE') {
       if (user.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
       
-      const { groupId, gradedCoinId, listingId, saleDate, salePrice, ebayFee, advertisingFee, shippingCost, coinCost, saleType, quantitySold, buyerUsername, notes } = req.body;
+      const { transactionId } = req.query;
+      if (!transactionId) {
+        return res.status(400).json({ error: 'Transaction ID required' });
+      }
 
-      const groupResult = await query(
-        'SELECT profit_share_percentage, profit_share_minimum, profit_share_maximum FROM groups WHERE group_id = $1',
-        [groupId]
-      );
-      if (groupResult.rows.length === 0) return res.status(400).json({ error: 'Group not found' });
-
-      const group = groupResult.rows[0];
-      const totalPayout = parseFloat(salePrice) - (parseFloat(ebayFee) || 0) - (parseFloat(advertisingFee) || 0) - (parseFloat(shippingCost) || 0);
-      const profit = totalPayout - parseFloat(coinCost);
-      
-      let profitShare = profit * parseFloat(group.profit_share_percentage);
-      profitShare = Math.max(profitShare, parseFloat(group.profit_share_minimum));
-      if (group.profit_share_maximum) profitShare = Math.min(profitShare, parseFloat(group.profit_share_maximum));
-
-      const result = await query(
-        `INSERT INTO sales_transactions (group_id, graded_coin_id, listing_id, sale_date, sale_price, ebay_fee, advertising_fee, shipping_cost, total_payout, coin_cost, profit, profit_share, sale_type, quantity_sold, buyer_username, notes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-         RETURNING *`,
-        [groupId, gradedCoinId || null, listingId, saleDate, salePrice, ebayFee || 0, advertisingFee || 0, shippingCost || 0, totalPayout, coinCost, profit, profitShare, saleType, quantitySold || 1, buyerUsername, notes]
-      );
-      return res.status(201).json(result.rows[0]);
+      await query('DELETE FROM sales_transactions WHERE transaction_id = $1', [transactionId]);
+      return res.json({ success: true });
     }
 
     res.status(405).json({ error: 'Method not allowed' });
