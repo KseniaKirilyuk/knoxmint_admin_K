@@ -9,128 +9,162 @@ function verifyToken(req) {
   } catch { return null; }
 }
 
-async function getAmountsOwed() {
-  // Calculate amounts owed based on:
-  // 1. User contributions per batch/coin_type
-  // 2. Sales transactions per batch/coin_type
-  // 3. FIFO: earlier batches get paid first
-  const result = await query(`
-    WITH batch_order AS (
-      SELECT batch_id, ROW_NUMBER() OVER (ORDER BY ship_date ASC NULLS LAST, created_at ASC) as batch_rank
-      FROM batches
-      WHERE status = 'Active'
-    ),
-    user_shares AS (
-      SELECT 
-        uc.user_id,
-        uc.batch_id,
-        uc.coin_type_id,
-        uc.quantity,
-        uc.quantity::decimal / NULLIF(SUM(uc.quantity) OVER (PARTITION BY uc.batch_id, uc.coin_type_id), 0) as share_pct
-      FROM user_contributions uc
-    ),
-    unpaid_transactions AS (
-      SELECT 
-        st.transaction_id,
-        st.batch_id,
-        st.coin_type_id,
-        st.profit_share,
-        COALESCE(st.profit_share, st.net_amount - COALESCE(bc.original_price, 0)) as calculated_profit
-      FROM sales_transactions st
-      LEFT JOIN batch_coins bc ON st.batch_id = bc.batch_id AND st.coin_type_id = bc.coin_type_id
-      WHERE st.is_paid_out = false
-    )
-    SELECT 
-      u.user_id,
-      u.username,
-      u.full_name,
-      b.batch_id,
-      b.batch_name,
-      bo.batch_rank,
-      COALESCE(SUM(ut.calculated_profit * us.share_pct), 0) as amount_owed,
-      COUNT(DISTINCT ut.transaction_id) as transaction_count
-    FROM users u
-    JOIN user_shares us ON u.user_id = us.user_id
-    JOIN batches b ON us.batch_id = b.batch_id
-    JOIN batch_order bo ON b.batch_id = bo.batch_id
-    LEFT JOIN unpaid_transactions ut ON us.batch_id = ut.batch_id 
-      AND us.coin_type_id = ut.coin_type_id
-    GROUP BY u.user_id, u.username, u.full_name, b.batch_id, b.batch_name, bo.batch_rank
-    HAVING COALESCE(SUM(ut.calculated_profit * us.share_pct), 0) > 0
-    ORDER BY bo.batch_rank, amount_owed DESC
-  `);
-  return result.rows;
-}
-
 export default async function handler(req, res) {
   const user = verifyToken(req);
   if (!user) return res.status(401).json({ error: 'Authentication required' });
 
   try {
     if (req.method === 'GET') {
-      const { action, status, limit = 100 } = req.query;
+      const { action, userId } = req.query;
 
-      // Get amounts owed
-      if (action === 'owed') {
-        const rows = await getAmountsOwed();
+      // Get member totals
+      if (action === 'memberTotals') {
+        // Step 1: Calculate each user's share per coin type
+        // share = user's contribution / total contributions for that coin type
+        // Step 2: For each sale, user gets: sale.payout * their share
+        const result = await query(`
+          WITH contribution_shares AS (
+            -- Each user's share percentage per coin type
+            SELECT 
+              uc.user_id,
+              uc.coin_type_id,
+              SUM(uc.quantity) as user_contributed,
+              SUM(SUM(uc.quantity)) OVER (PARTITION BY uc.coin_type_id) as total_contributed,
+              SUM(uc.quantity)::decimal / NULLIF(SUM(SUM(uc.quantity)) OVER (PARTITION BY uc.coin_type_id), 0) as share_pct
+            FROM user_contributions uc
+            WHERE uc.quantity > 0
+            GROUP BY uc.user_id, uc.coin_type_id
+          ),
+          sale_splits AS (
+            -- For each sale, calculate each user's portion based on their share
+            SELECT 
+              cs.user_id,
+              st.transaction_id,
+              st.payout * cs.share_pct as user_payout,
+              st.is_paid_out
+            FROM sales_transactions st
+            JOIN contribution_shares cs ON st.coin_type_id = cs.coin_type_id
+            WHERE st.payout > 0
+          ),
+          user_totals AS (
+            SELECT 
+              user_id,
+              COALESCE(SUM(user_payout), 0) as total_earned,
+              COALESCE(SUM(CASE WHEN is_paid_out = false THEN user_payout ELSE 0 END), 0) as unpaid,
+              COALESCE(SUM(CASE WHEN is_paid_out = true THEN user_payout ELSE 0 END), 0) as paid_from_sales,
+              COUNT(DISTINCT transaction_id) as sale_count
+            FROM sale_splits
+            GROUP BY user_id
+          )
+          SELECT 
+            u.user_id,
+            u.username,
+            u.full_name,
+            COALESCE(SUM(uc.quantity), 0) as total_contributed,
+            COALESCE(ut.total_earned, 0) as total_earned,
+            COALESCE(ut.unpaid, 0) as unpaid,
+            COALESCE((SELECT SUM(amount) FROM payouts WHERE user_id = u.user_id AND status = 'Paid'), 0) as total_paid,
+            COALESCE(ut.sale_count, 0) as sale_count
+          FROM users u
+          LEFT JOIN user_contributions uc ON u.user_id = uc.user_id
+          LEFT JOIN user_totals ut ON u.user_id = ut.user_id
+          GROUP BY u.user_id, u.username, u.full_name, ut.total_earned, ut.unpaid, ut.sale_count
+          HAVING COALESCE(SUM(uc.quantity), 0) > 0 OR COALESCE(ut.total_earned, 0) > 0
+          ORDER BY COALESCE(ut.unpaid, 0) DESC, u.full_name
+        `);
+        
+        // Calculate balance = total_earned - total_paid (from payouts table)
+        const rows = result.rows.map(r => ({
+          ...r,
+          balance: Math.max(0, parseFloat(r.total_earned || 0) - parseFloat(r.total_paid || 0))
+        }));
+        
         return res.json(rows);
       }
-      
-      // Get payouts list
-      let sql = `
-        SELECT p.*, u.username, u.full_name, b.batch_name
-        FROM payouts p
-        JOIN users u ON p.user_id = u.user_id
-        JOIN batches b ON p.batch_id = b.batch_id
-      `;
-      const params = [];
 
-      if (status) {
-        sql += ' WHERE p.status = $1';
-        params.push(status);
+      // Get breakdown for a specific member
+      if (action === 'memberBreakdown' && userId) {
+        const result = await query(`
+          WITH contribution_shares AS (
+            SELECT 
+              uc.user_id,
+              uc.batch_id,
+              uc.coin_type_id,
+              uc.quantity as user_contributed,
+              SUM(uc.quantity) OVER (PARTITION BY uc.coin_type_id) as total_for_coin,
+              uc.quantity::decimal / NULLIF(SUM(uc.quantity) OVER (PARTITION BY uc.coin_type_id), 0) as share_pct
+            FROM user_contributions uc
+            WHERE uc.user_id = $1 AND uc.quantity > 0
+          ),
+          coin_sales AS (
+            SELECT 
+              cs.batch_id,
+              cs.coin_type_id,
+              cs.user_contributed,
+              cs.total_for_coin,
+              cs.share_pct,
+              COUNT(st.transaction_id) as sales_count,
+              COALESCE(SUM(st.quantity_sold), 0) as total_sold,
+              COALESCE(SUM(st.payout * cs.share_pct), 0) as user_payout
+            FROM contribution_shares cs
+            LEFT JOIN sales_transactions st ON cs.coin_type_id = st.coin_type_id
+            GROUP BY cs.batch_id, cs.coin_type_id, cs.user_contributed, cs.total_for_coin, cs.share_pct
+          )
+          SELECT 
+            b.batch_id,
+            b.batch_name,
+            b.ship_date,
+            ct.coin_type_id,
+            ct.name as coin_type_name,
+            cs.user_contributed,
+            cs.total_for_coin,
+            cs.total_sold,
+            cs.user_payout,
+            ROUND(cs.share_pct * 100, 1) as share_pct
+          FROM coin_sales cs
+          JOIN batches b ON cs.batch_id = b.batch_id
+          JOIN coin_types ct ON cs.coin_type_id = ct.coin_type_id
+          ORDER BY b.ship_date DESC NULLS LAST, ct.name
+        `, [userId]);
+        return res.json(result.rows);
       }
-      
-      sql += ` ORDER BY p.payout_date DESC, p.payout_id DESC LIMIT $${params.length + 1}`;
-      params.push(parseInt(limit));
 
-      const result = await query(sql, params);
-      return res.json(result.rows);
+      // Get payment history
+      if (action === 'history') {
+        const result = await query(`
+          SELECT p.*, u.username, u.full_name
+          FROM payouts p
+          JOIN users u ON p.user_id = u.user_id
+          ORDER BY p.payout_date DESC, p.created_at DESC
+          LIMIT 100
+        `);
+        return res.json(result.rows);
+      }
+
+      return res.json([]);
     }
 
     if (req.method === 'POST') {
       if (user.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
       
-      const { userId, batchId, amount, paymentMethod, paymentReference, notes } = req.body;
+      const { userId, amount, paymentMethod, paymentReference, notes } = req.body;
+
+      if (!userId || !amount) {
+        return res.status(400).json({ error: 'User ID and amount required' });
+      }
 
       const result = await query(
-        `INSERT INTO payouts (user_id, batch_id, payout_date, amount, status, payment_method, payment_reference, notes)
-         VALUES ($1, $2, CURRENT_DATE, $3, 'Pending', $4, $5, $6)
+        `INSERT INTO payouts (user_id, payout_date, amount, status, payment_method, payment_reference, notes)
+         VALUES ($1, CURRENT_DATE, $2, 'Paid', $3, $4, $5)
          RETURNING *`,
-        [userId, batchId, amount, paymentMethod, paymentReference, notes]
+        [userId, amount, paymentMethod || 'Manual', paymentReference, notes]
       );
       return res.status(201).json(result.rows[0]);
-    }
-
-    if (req.method === 'PUT') {
-      if (user.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
-      
-      const { payoutId } = req.query;
-      const { status } = req.body;
-
-      if (payoutId && status) {
-        await query(
-          'UPDATE payouts SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE payout_id = $2',
-          [status, payoutId]
-        );
-        return res.json({ success: true });
-      }
-      
-      return res.status(400).json({ error: 'Payout ID and status required' });
     }
 
     res.status(405).json({ error: 'Method not allowed' });
   } catch (error) {
     console.error('Payouts error:', error);
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: 'Server error: ' + error.message });
   }
 }
