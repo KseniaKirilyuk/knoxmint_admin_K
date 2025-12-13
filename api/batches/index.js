@@ -232,6 +232,65 @@ export default async function handler(req, res) {
         return res.status(201).json(result.rows[0]);
       }
 
+      // Update coin type
+      if (action === 'updateCoinType') {
+        const { coinTypeId, name, shortCode, mintCatalogNumber, originalPrice, currentPrice, description } = req.body;
+        if (!coinTypeId) return res.status(400).json({ error: 'Coin type ID required' });
+
+        const result = await query(
+          `UPDATE coin_types SET
+            name = COALESCE($1, name),
+            short_code = $2,
+            mint_catalog_number = $3,
+            original_price = $4,
+            current_price = $5,
+            description = $6
+           WHERE coin_type_id = $7
+           RETURNING *`,
+          [name, shortCode || null, mintCatalogNumber || null, originalPrice || null, currentPrice || null, description || null, coinTypeId]
+        );
+        
+        if (result.rows.length === 0) {
+          return res.status(404).json({ error: 'Coin type not found' });
+        }
+        return res.json(result.rows[0]);
+      }
+
+      // Delete coin type
+      if (action === 'deleteCoinType') {
+        const { coinTypeId } = req.body;
+        if (!coinTypeId) return res.status(400).json({ error: 'Coin type ID required' });
+
+        // Check if coin type is used in transactions
+        const usageCheck = await query(
+          'SELECT COUNT(*) as count FROM sales_transactions WHERE coin_type_id = $1',
+          [coinTypeId]
+        );
+        
+        if (parseInt(usageCheck.rows[0].count) > 0) {
+          return res.status(400).json({ 
+            error: `Cannot delete: This coin type is used in ${usageCheck.rows[0].count} sales transactions` 
+          });
+        }
+
+        // Check if coin type is used in contributions
+        const contribCheck = await query(
+          'SELECT COUNT(*) as count FROM user_contributions WHERE coin_type_id = $1',
+          [coinTypeId]
+        );
+        
+        if (parseInt(contribCheck.rows[0].count) > 0) {
+          return res.status(400).json({ 
+            error: `Cannot delete: This coin type is used in ${contribCheck.rows[0].count} user contributions` 
+          });
+        }
+
+        await query('DELETE FROM batch_coins WHERE coin_type_id = $1', [coinTypeId]);
+        await query('DELETE FROM coin_types WHERE coin_type_id = $1', [coinTypeId]);
+        
+        return res.json({ success: true });
+      }
+
       return res.status(400).json({ error: 'Invalid action' });
     }
 

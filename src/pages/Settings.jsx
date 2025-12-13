@@ -58,6 +58,45 @@ export default function Settings() {
     }
   }
 
+  const openEditModal = (coin) => {
+    setEditingCoin(coin)
+    setCoinForm({
+      name: coin.name || '',
+      shortCode: coin.short_code || '',
+      mintCatalogNumber: coin.mint_catalog_number || '',
+      originalPrice: coin.original_price || '',
+      currentPrice: coin.current_price || '',
+      description: coin.description || ''
+    })
+  }
+
+  const handleEditCoin = async (e) => {
+    e.preventDefault()
+    try {
+      await api.post('/batches', { 
+        action: 'updateCoinType', 
+        coinTypeId: editingCoin.coin_type_id,
+        ...coinForm 
+      })
+      setEditingCoin(null)
+      setCoinForm({ name: '', shortCode: '', mintCatalogNumber: '', originalPrice: '', currentPrice: '', description: '' })
+      fetchCoinTypes()
+    } catch (error) {
+      alert(error.response?.data?.error || 'Error updating coin type')
+    }
+  }
+
+  const handleDeleteCoin = async (coinTypeId, coinName) => {
+    if (!confirm(`Delete "${coinName}"? This cannot be undone.`)) return
+    
+    try {
+      await api.post('/batches', { action: 'deleteCoinType', coinTypeId })
+      fetchCoinTypes()
+    } catch (error) {
+      alert(error.response?.data?.error || 'Error deleting coin type')
+    }
+  }
+
   // File upload handlers
   const handleDrag = useCallback((e) => {
     e.preventDefault()
@@ -262,6 +301,7 @@ export default function Settings() {
                         <th className="table-header">Catalog #</th>
                         <th className="table-header text-right">Original $</th>
                         <th className="table-header text-right">Current $</th>
+                        <th className="table-header w-24"></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -276,6 +316,24 @@ export default function Settings() {
                           <td className="table-cell">{coin.mint_catalog_number || '-'}</td>
                           <td className="table-cell text-right">{coin.original_price ? `$${parseFloat(coin.original_price).toFixed(2)}` : '-'}</td>
                           <td className="table-cell text-right">{coin.current_price ? `$${parseFloat(coin.current_price).toFixed(2)}` : '-'}</td>
+                          <td className="table-cell">
+                            <div className="flex items-center justify-end gap-1">
+                              <button
+                                onClick={() => openEditModal(coin)}
+                                className="p-1.5 text-slate-400 hover:text-knox-600 hover:bg-knox-50 rounded"
+                                title="Edit"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteCoin(coin.coin_type_id, coin.name)}
+                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded"
+                                title="Delete"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -494,6 +552,87 @@ export default function Settings() {
                 </button>
                 <button type="submit" className="btn btn-primary flex-1">
                   Add Coin
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Coin Modal */}
+      {editingCoin && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <h2 className="text-lg font-semibold">Edit Coin Type</h2>
+              <button onClick={() => setEditingCoin(null)} className="p-2 hover:bg-slate-100 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleEditCoin} className="p-6 space-y-4">
+              <div>
+                <label className="label">Coin Name *</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="e.g., Morgan, Sacagawea"
+                  value={coinForm.name}
+                  onChange={(e) => setCoinForm({ ...coinForm, name: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Short Code</label>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="e.g., MORG"
+                    value={coinForm.shortCode}
+                    onChange={(e) => setCoinForm({ ...coinForm, shortCode: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="label">Catalog #</label>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="e.g., 25SG1"
+                    value={coinForm.mintCatalogNumber}
+                    onChange={(e) => setCoinForm({ ...coinForm, mintCatalogNumber: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Original Price ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="input"
+                    placeholder="e.g., 105.00"
+                    value={coinForm.originalPrice}
+                    onChange={(e) => setCoinForm({ ...coinForm, originalPrice: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="label">Current Price ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="input"
+                    placeholder="e.g., 105.00"
+                    value={coinForm.currentPrice}
+                    onChange={(e) => setCoinForm({ ...coinForm, currentPrice: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="flex gap-3 pt-4">
+                <button type="button" onClick={() => setEditingCoin(null)} className="btn btn-secondary flex-1">
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary flex-1">
+                  Save Changes
                 </button>
               </div>
             </form>
