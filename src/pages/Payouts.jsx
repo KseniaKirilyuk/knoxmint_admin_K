@@ -254,18 +254,19 @@ export default function Payouts() {
                           )}
                         </td>
                         <td className="table-cell text-right" onClick={(e) => e.stopPropagation()}>
-                          {balance > 0 && (
+                          {balance > 0 ? (
                             <button
                               onClick={() => openPayModal(member)}
                               className="btn btn-primary text-xs py-1 px-3"
                             >
                               Pay
                             </button>
-                          )}
-                          {balance <= 0 && (
+                          ) : parseFloat(member.total_earned || 0) > 0 ? (
                             <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded text-xs">
                               ✓ Paid
                             </span>
+                          ) : (
+                            <span className="text-slate-400 text-xs">No sales yet</span>
                           )}
                         </td>
                       </tr>
