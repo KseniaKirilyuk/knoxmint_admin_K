@@ -8,6 +8,7 @@ export default function Upload() {
   const [parsedData, setParsedData] = useState(null)
   const [coinTypes, setCoinTypes] = useState([])
   const [coinMappings, setCoinMappings] = useState({})
+  const [newCoinCosts, setNewCoinCosts] = useState({})
   const [importing, setImporting] = useState(false)
   const [results, setResults] = useState(null)
   const [error, setError] = useState('')
@@ -217,9 +218,12 @@ export default function Upload() {
     try {
       const response = await api.post('/upload', {
         transactions: parsedData.orders,
-        coinMappings
+        coinMappings,
+        newCoinCosts
       })
       setResults(response.data)
+      // Refresh coin types in case new ones were created
+      fetchCoinTypes()
     } catch (err) {
       setError(err.response?.data?.error || 'Import failed')
     } finally {
@@ -233,6 +237,7 @@ export default function Upload() {
     setResults(null)
     setError('')
     setCoinMappings({})
+    setNewCoinCosts({})
   }
 
   return (
@@ -326,17 +331,22 @@ export default function Upload() {
               <div className="space-y-3">
                 {parsedData.unmatched.map(ct => (
                   <div key={ct.name} className="flex items-center gap-3">
-                    <span className="text-sm font-medium text-amber-800 w-32 truncate">{ct.name}</span>
+                    <span className="text-sm font-medium text-amber-800 w-32 truncate" title={ct.name}>{ct.name}</span>
                     <span className="text-slate-400">→</span>
                     <select
-                      className="input text-sm flex-1"
-                      value={coinMappings[ct.name] || ''}
-                      onChange={(e) => setCoinMappings({
-                        ...coinMappings,
-                        [ct.name]: e.target.value ? parseInt(e.target.value) : null
-                      })}
+                      className="input text-sm w-48"
+                      value={coinMappings[ct.name] || 'create'}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        if (val === 'skip' || val === 'create') {
+                          setCoinMappings({ ...coinMappings, [ct.name]: val })
+                        } else {
+                          setCoinMappings({ ...coinMappings, [ct.name]: parseInt(val) })
+                        }
+                      }}
                     >
-                      <option value="">Skip (no coin cost)</option>
+                      <option value="create">+ Create new coin type</option>
+                      <option value="skip">Skip (no cost)</option>
                       <optgroup label="Existing coin types">
                         {coinTypes.map(existing => (
                           <option key={existing.coin_type_id} value={existing.coin_type_id}>
@@ -345,9 +355,31 @@ export default function Upload() {
                         ))}
                       </optgroup>
                     </select>
+                    {coinMappings[ct.name] === 'create' || !coinMappings[ct.name] ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-slate-500">Cost:</span>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="0.00"
+                            className="input text-sm w-28 pl-7"
+                            value={newCoinCosts[ct.name] || ''}
+                            onChange={(e) => setNewCoinCosts({
+                              ...newCoinCosts,
+                              [ct.name]: e.target.value
+                            })}
+                          />
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 ))}
               </div>
+              <p className="text-xs text-amber-700 mt-3">
+                New coin types will be added to your catalog with the cost you enter.
+              </p>
             </div>
           )}
 
@@ -411,7 +443,7 @@ export default function Upload() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 mb-6">
+            <div className="grid grid-cols-3 gap-4 mb-6">
               <div className="p-4 bg-emerald-50 rounded-lg">
                 <p className="text-sm text-emerald-600 font-medium">Imported</p>
                 <p className="text-2xl font-bold text-emerald-700">{results.imported}</p>
@@ -420,6 +452,12 @@ export default function Upload() {
                 <p className="text-sm text-slate-600 font-medium">Skipped (duplicates)</p>
                 <p className="text-2xl font-bold text-slate-700">{results.skipped}</p>
               </div>
+              {results.createdCoinTypes > 0 && (
+                <div className="p-4 bg-knox-50 rounded-lg">
+                  <p className="text-sm text-knox-600 font-medium">New Coin Types</p>
+                  <p className="text-2xl font-bold text-knox-700">{results.createdCoinTypes}</p>
+                </div>
+              )}
             </div>
 
             {results.errors?.length > 0 && (
