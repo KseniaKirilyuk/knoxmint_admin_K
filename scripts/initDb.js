@@ -28,15 +28,12 @@ CREATE TABLE users (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- COIN TYPES TABLE (master list of coin types)
+-- COIN TYPES TABLE (master catalog - prices are set per batch)
 CREATE TABLE coin_types (
     coin_type_id SERIAL PRIMARY KEY,
     name VARCHAR(100) UNIQUE NOT NULL,
     short_code VARCHAR(20),
     mint_catalog_number VARCHAR(50),
-    year INTEGER,
-    original_price DECIMAL(10, 2),
-    current_price DECIMAL(10, 2),
     description TEXT,
     keywords TEXT[],
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -56,13 +53,12 @@ CREATE TABLE batches (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- BATCH COINS TABLE (coins in each batch with pricing)
+-- BATCH COINS TABLE (coins in each batch with cost per coin)
 CREATE TABLE batch_coins (
     id SERIAL PRIMARY KEY,
     batch_id INTEGER REFERENCES batches(batch_id) ON DELETE CASCADE,
     coin_type_id INTEGER REFERENCES coin_types(coin_type_id),
-    original_price DECIMAL(10, 2),
-    current_price DECIMAL(10, 2),
+    cost_per_coin DECIMAL(10, 2),
     total_contributed INTEGER DEFAULT 0,
     total_sold INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

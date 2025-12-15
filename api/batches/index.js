@@ -166,19 +166,18 @@ export default async function handler(req, res) {
           }
         }
 
-        // Update batch_coins totals and prices
+        // Update batch_coins totals and cost
         for (const [coinTypeId, total] of Object.entries(coinTypeTotals)) {
-          const prices = coinPrices?.[coinTypeId] || {};
+          const costPerCoin = coinPrices?.[coinTypeId] || null;
           await query(`
-            INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed, original_price, current_price)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed, cost_per_coin)
+            VALUES ($1, $2, $3, $4)
             ON CONFLICT (batch_id, coin_type_id)
             DO UPDATE SET 
               total_contributed = batch_coins.total_contributed + $3,
-              original_price = COALESCE($4, batch_coins.original_price),
-              current_price = COALESCE($5, batch_coins.current_price),
+              cost_per_coin = COALESCE($4, batch_coins.cost_per_coin),
               updated_at = CURRENT_TIMESTAMP
-          `, [batchId, coinTypeId, total, prices.original || null, prices.current || null]);
+          `, [batchId, coinTypeId, total, costPerCoin]);
         }
 
         return res.json({ success: true, imported, errors: errors.slice(0, 10) });
@@ -214,27 +213,25 @@ export default async function handler(req, res) {
 
       // Add or update coin type
       if (action === 'addCoinType') {
-        const { name, shortCode, mintCatalogNumber, originalPrice, currentPrice, description } = req.body;
+        const { name, shortCode, mintCatalogNumber, description } = req.body;
         if (!name) return res.status(400).json({ error: 'Name required' });
 
         const result = await query(
-          `INSERT INTO coin_types (name, short_code, mint_catalog_number, original_price, current_price, description, keywords)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
+          `INSERT INTO coin_types (name, short_code, mint_catalog_number, description, keywords)
+           VALUES ($1, $2, $3, $4, $5)
            ON CONFLICT (name) DO UPDATE SET
              short_code = COALESCE(EXCLUDED.short_code, coin_types.short_code),
              mint_catalog_number = COALESCE(EXCLUDED.mint_catalog_number, coin_types.mint_catalog_number),
-             original_price = COALESCE(EXCLUDED.original_price, coin_types.original_price),
-             current_price = COALESCE(EXCLUDED.current_price, coin_types.current_price),
              description = COALESCE(EXCLUDED.description, coin_types.description)
            RETURNING *`,
-          [name, shortCode || null, mintCatalogNumber || null, originalPrice || null, currentPrice || null, description || null, [name]]
+          [name, shortCode || null, mintCatalogNumber || null, description || null, [name]]
         );
         return res.status(201).json(result.rows[0]);
       }
 
       // Update coin type
       if (action === 'updateCoinType') {
-        const { coinTypeId, name, shortCode, mintCatalogNumber, originalPrice, currentPrice, description } = req.body;
+        const { coinTypeId, name, shortCode, mintCatalogNumber, description } = req.body;
         if (!coinTypeId) return res.status(400).json({ error: 'Coin type ID required' });
 
         const result = await query(
@@ -242,12 +239,10 @@ export default async function handler(req, res) {
             name = COALESCE($1, name),
             short_code = $2,
             mint_catalog_number = $3,
-            original_price = $4,
-            current_price = $5,
-            description = $6
-           WHERE coin_type_id = $7
+            description = $4
+           WHERE coin_type_id = $5
            RETURNING *`,
-          [name, shortCode || null, mintCatalogNumber || null, originalPrice || null, currentPrice || null, description || null, coinTypeId]
+          [name, shortCode || null, mintCatalogNumber || null, description || null, coinTypeId]
         );
         
         if (result.rows.length === 0) {
@@ -317,14 +312,14 @@ export default async function handler(req, res) {
         return res.json({ success: true });
       }
 
-      // Update coin prices in batch
+      // Update coin prices in batch (simple cost_per_coin)
       if (batchId && coinPrices) {
-        for (const [coinTypeId, prices] of Object.entries(coinPrices)) {
+        for (const [coinTypeId, price] of Object.entries(coinPrices)) {
           await query(`
             UPDATE batch_coins 
-            SET original_price = $1, current_price = $2, updated_at = CURRENT_TIMESTAMP
-            WHERE batch_id = $3 AND coin_type_id = $4
-          `, [prices.original, prices.current, batchId, coinTypeId]);
+            SET cost_per_coin = $1, updated_at = CURRENT_TIMESTAMP
+            WHERE batch_id = $2 AND coin_type_id = $3
+          `, [price || null, batchId, coinTypeId]);
         }
         return res.json({ success: true });
       }

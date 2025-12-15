@@ -107,7 +107,27 @@ export default async function handler(req, res) {
         // Find coin type by exact title match
         const coinType = titleToCoinType[tx.itemTitle];
         const coinTypeId = coinType?.coin_type_id || null;
-        const coinCost = coinType ? (parseFloat(coinType.original_price) || 0) : 0;
+        
+        // Get cost_per_coin from batch_coins (use oldest batch with available inventory - FIFO)
+        let coinCost = 0;
+        let batchId = null;
+        if (coinTypeId) {
+          const batchCoin = await query(`
+            SELECT bc.batch_id, bc.cost_per_coin, bc.total_contributed, bc.total_sold
+            FROM batch_coins bc
+            JOIN batches b ON bc.batch_id = b.batch_id
+            WHERE bc.coin_type_id = $1 
+              AND bc.cost_per_coin IS NOT NULL
+              AND bc.total_sold < bc.total_contributed
+            ORDER BY b.ship_date ASC NULLS LAST, b.created_at ASC
+            LIMIT 1
+          `, [coinTypeId]);
+          
+          if (batchCoin.rows.length > 0) {
+            coinCost = parseFloat(batchCoin.rows[0].cost_per_coin) || 0;
+            batchId = batchCoin.rows[0].batch_id;
+          }
+        }
 
         // Calculate values
         const salePrice = parseFloat(tx.salePrice) || 0;
@@ -126,12 +146,13 @@ export default async function handler(req, res) {
         // Insert transaction
         await query(`
           INSERT INTO sales_transactions (
-            coin_type_id, listing_id, order_number, item_title, sale_date,
+            batch_id, coin_type_id, listing_id, order_number, item_title, sale_date,
             sale_price, ebay_fee, advertising_fee, shipping_cost, total_payout,
             coin_cost, profit, profit_share, payout, profit_margin,
             grade, quantity_sold, imported_from
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
         `, [
+          batchId,
           coinTypeId,
           tx.listingId || null,
           tx.orderNumber || null,
@@ -151,6 +172,15 @@ export default async function handler(req, res) {
           quantity,
           'ebay_upload'
         ]);
+
+        // Update batch_coins sold count
+        if (batchId) {
+          await query(`
+            UPDATE batch_coins 
+            SET total_sold = total_sold + $1, updated_at = CURRENT_TIMESTAMP
+            WHERE batch_id = $2 AND coin_type_id = $3
+          `, [quantity, batchId, coinTypeId]);
+        }
 
         imported++;
       } catch (err) {

@@ -21,7 +21,7 @@ export default function Settings() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [showUploadModal, setShowUploadModal] = useState(false)
   const [editingCoin, setEditingCoin] = useState(null)
-  const [coinForm, setCoinForm] = useState({ name: '', shortCode: '', mintCatalogNumber: '', originalPrice: '', currentPrice: '', description: '' })
+  const [coinForm, setCoinForm] = useState({ name: '', shortCode: '', mintCatalogNumber: '', description: '' })
   const [uploadData, setUploadData] = useState(null)
   const [uploadResults, setUploadResults] = useState(null)
   const [uploading, setUploading] = useState(false)
@@ -51,7 +51,7 @@ export default function Settings() {
     try {
       await api.post('/batches', { action: 'addCoinType', ...coinForm })
       setShowAddModal(false)
-      setCoinForm({ name: '', shortCode: '', mintCatalogNumber: '', originalPrice: '', currentPrice: '', description: '' })
+      setCoinForm({ name: '', shortCode: '', mintCatalogNumber: '', description: '' })
       fetchCoinTypes()
     } catch (error) {
       alert(error.response?.data?.error || 'Error adding coin type')
@@ -64,8 +64,6 @@ export default function Settings() {
       name: coin.name || '',
       shortCode: coin.short_code || '',
       mintCatalogNumber: coin.mint_catalog_number || '',
-      originalPrice: coin.original_price || '',
-      currentPrice: coin.current_price || '',
       description: coin.description || ''
     })
   }
@@ -79,7 +77,7 @@ export default function Settings() {
         ...coinForm 
       })
       setEditingCoin(null)
-      setCoinForm({ name: '', shortCode: '', mintCatalogNumber: '', originalPrice: '', currentPrice: '', description: '' })
+      setCoinForm({ name: '', shortCode: '', mintCatalogNumber: '', description: '' })
       fetchCoinTypes()
     } catch (error) {
       alert(error.response?.data?.error || 'Error updating coin type')
@@ -299,8 +297,6 @@ export default function Settings() {
                         <th className="table-header">Name</th>
                         <th className="table-header">Code</th>
                         <th className="table-header">Catalog #</th>
-                        <th className="table-header text-right">Original $</th>
-                        <th className="table-header text-right">Current $</th>
                         <th className="table-header w-24"></th>
                       </tr>
                     </thead>
@@ -314,8 +310,6 @@ export default function Settings() {
                             </span>
                           </td>
                           <td className="table-cell">{coin.mint_catalog_number || '-'}</td>
-                          <td className="table-cell text-right">{coin.original_price ? `$${parseFloat(coin.original_price).toFixed(2)}` : '-'}</td>
-                          <td className="table-cell text-right">{coin.current_price ? `$${parseFloat(coin.current_price).toFixed(2)}` : '-'}</td>
                           <td className="table-cell">
                             <div className="flex items-center justify-end gap-1">
                               <button
@@ -522,30 +516,6 @@ export default function Settings() {
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Original Price ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    className="input"
-                    placeholder="e.g., 105.00"
-                    value={coinForm.originalPrice}
-                    onChange={(e) => setCoinForm({ ...coinForm, originalPrice: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="label">Current Price ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    className="input"
-                    placeholder="e.g., 105.00"
-                    value={coinForm.currentPrice}
-                    onChange={(e) => setCoinForm({ ...coinForm, currentPrice: e.target.value })}
-                  />
-                </div>
-              </div>
               <div className="flex gap-3 pt-4">
                 <button type="button" onClick={() => setShowAddModal(false)} className="btn btn-secondary flex-1">
                   Cancel
@@ -600,30 +570,6 @@ export default function Settings() {
                     placeholder="e.g., 25SG1"
                     value={coinForm.mintCatalogNumber}
                     onChange={(e) => setCoinForm({ ...coinForm, mintCatalogNumber: e.target.value })}
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Original Price ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    className="input"
-                    placeholder="e.g., 105.00"
-                    value={coinForm.originalPrice}
-                    onChange={(e) => setCoinForm({ ...coinForm, originalPrice: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="label">Current Price ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    className="input"
-                    placeholder="e.g., 105.00"
-                    value={coinForm.currentPrice}
-                    onChange={(e) => setCoinForm({ ...coinForm, currentPrice: e.target.value })}
                   />
                 </div>
               </div>
