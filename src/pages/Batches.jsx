@@ -510,7 +510,10 @@ export default function Batches() {
                             // Initialize prices from current batch coins
                             const prices = {}
                             batchDetails.coins.forEach(c => {
-                              prices[c.coin_type_id] = c.cost_per_coin || ''
+                              // Use string key and ensure value is properly formatted
+                              const key = String(c.coin_type_id)
+                              const val = c.cost_per_coin ? parseFloat(c.cost_per_coin) : ''
+                              prices[key] = val === 0 ? '' : val
                             })
                             setCoinPrices(prices)
                             setSelectedBatchId(expandedBatch)
@@ -724,30 +727,33 @@ export default function Batches() {
               </button>
             </div>
             <div className="p-6 space-y-4 max-h-96 overflow-y-auto">
-              {batchDetails.coins?.map(coin => (
-                <div key={coin.id} className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="font-medium">{coin.coin_type_name}</p>
-                    <p className="text-xs text-slate-500">{coin.total_contributed} coins</p>
-                  </div>
-                  <div className="w-32">
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        className="input pl-7 text-right"
-                        placeholder="0.00"
-                        value={coinPrices[coin.coin_type_id] || ''}
-                        onChange={(e) => setCoinPrices({
-                          ...coinPrices,
-                          [coin.coin_type_id]: e.target.value
-                        })}
-                      />
+              {batchDetails.coins?.map(coin => {
+                const key = String(coin.coin_type_id)
+                return (
+                  <div key={coin.id} className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="font-medium">{coin.coin_type_name}</p>
+                      <p className="text-xs text-slate-500">{coin.total_contributed} coins</p>
+                    </div>
+                    <div className="w-32">
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          className="input pl-7 text-right"
+                          placeholder="0.00"
+                          value={coinPrices[key] ?? ''}
+                          onChange={(e) => setCoinPrices({
+                            ...coinPrices,
+                            [key]: e.target.value
+                          })}
+                        />
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
             <div className="px-6 py-4 border-t flex gap-3">
               <button onClick={() => setShowPricesModal(false)} className="btn btn-secondary flex-1">
