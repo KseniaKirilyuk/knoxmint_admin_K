@@ -74,13 +74,20 @@ export default async function handler(req, res) {
       const result = await query(`
         SELECT 
           b.*,
-          COALESCE(SUM(bc.total_contributed), 0) as total_coins,
-          COUNT(DISTINCT uc.user_id) as contributor_count,
-          COALESCE(SUM(bc.total_sold), 0) as total_sold
+          COALESCE(coins.total_coins, 0) as total_coins,
+          COALESCE(coins.total_sold, 0) as total_sold,
+          COALESCE(contribs.contributor_count, 0) as contributor_count
         FROM batches b
-        LEFT JOIN batch_coins bc ON b.batch_id = bc.batch_id
-        LEFT JOIN user_contributions uc ON b.batch_id = uc.batch_id
-        GROUP BY b.batch_id
+        LEFT JOIN (
+          SELECT batch_id, SUM(total_contributed) as total_coins, SUM(total_sold) as total_sold
+          FROM batch_coins
+          GROUP BY batch_id
+        ) coins ON b.batch_id = coins.batch_id
+        LEFT JOIN (
+          SELECT batch_id, COUNT(DISTINCT user_id) as contributor_count
+          FROM user_contributions
+          GROUP BY batch_id
+        ) contribs ON b.batch_id = contribs.batch_id
         ORDER BY b.ship_date DESC NULLS LAST, b.created_at DESC
       `);
       return res.json(result.rows);
