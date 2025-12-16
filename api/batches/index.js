@@ -330,7 +330,14 @@ export default async function handler(req, res) {
         await ensureCostColumn();
         
         for (const [coinTypeId, price] of Object.entries(coinPrices)) {
-          const priceValue = price === '' || price === null || price === undefined ? null : parseFloat(price);
+          // Only save if we have a valid price or explicitly null/empty
+          let priceValue = null;
+          if (price !== '' && price !== null && price !== undefined) {
+            const parsed = parseFloat(price);
+            if (!isNaN(parsed)) {
+              priceValue = parsed;
+            }
+          }
           await query(`
             UPDATE batch_coins 
             SET cost_per_coin = $1, updated_at = CURRENT_TIMESTAMP

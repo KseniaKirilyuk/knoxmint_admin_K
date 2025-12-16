@@ -510,10 +510,14 @@ export default function Batches() {
                             // Initialize prices from current batch coins
                             const prices = {}
                             batchDetails.coins.forEach(c => {
-                              // Use string key and ensure value is properly formatted
                               const key = String(c.coin_type_id)
-                              const val = c.cost_per_coin ? parseFloat(c.cost_per_coin) : ''
-                              prices[key] = val === 0 ? '' : val
+                              // Check if we have a valid number
+                              const numVal = parseFloat(c.cost_per_coin)
+                              if (c.cost_per_coin !== null && c.cost_per_coin !== undefined && !isNaN(numVal)) {
+                                prices[key] = numVal
+                              } else {
+                                prices[key] = ''
+                              }
                             })
                             setCoinPrices(prices)
                             setSelectedBatchId(expandedBatch)
@@ -525,19 +529,23 @@ export default function Batches() {
                         </button>
                       </div>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        {batchDetails.coins.map(coin => (
-                          <div key={coin.id} className="p-3 bg-slate-50 rounded-lg">
-                            <p className="font-medium text-sm">{coin.coin_type_name}</p>
-                            <p className="text-xs text-slate-500">{coin.total_contributed} coins</p>
-                            <div className="mt-1 text-sm">
-                              {coin.cost_per_coin ? (
-                                <span className="text-emerald-600 font-medium">${parseFloat(coin.cost_per_coin).toFixed(2)}</span>
-                              ) : (
-                                <span className="text-amber-600">No price set</span>
-                              )}
+                        {batchDetails.coins.map(coin => {
+                          const price = parseFloat(coin.cost_per_coin)
+                          const hasValidPrice = coin.cost_per_coin !== null && coin.cost_per_coin !== undefined && !isNaN(price) && price > 0
+                          return (
+                            <div key={coin.id} className="p-3 bg-slate-50 rounded-lg">
+                              <p className="font-medium text-sm">{coin.coin_type_name}</p>
+                              <p className="text-xs text-slate-500">{coin.total_contributed} coins</p>
+                              <div className="mt-1 text-sm">
+                                {hasValidPrice ? (
+                                  <span className="text-emerald-600 font-medium">${price.toFixed(2)}</span>
+                                ) : (
+                                  <span className="text-amber-600">No price set</span>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          )
+                        })}
                       </div>
                     </div>
                   )}
