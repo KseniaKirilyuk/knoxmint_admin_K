@@ -124,6 +124,7 @@ export default async function handler(req, res) {
               COUNT(CASE WHEN COALESCE(st.is_refund, false) = false THEN st.transaction_id END) as sales_count,
               COUNT(CASE WHEN st.is_refund = true THEN st.transaction_id END) as refund_count,
               COALESCE(SUM(st.quantity_sold), 0) as total_sold,
+              COALESCE(SUM(st.payout), 0) as total_payout_all,
               COALESCE(SUM(st.payout * uc.share_pct), 0) as user_payout,
               COALESCE(SUM(CASE WHEN st.is_refund = true THEN st.payout * uc.share_pct ELSE 0 END), 0) as refund_amount
             FROM user_contribs uc
@@ -139,6 +140,7 @@ export default async function handler(req, res) {
             cs.user_contributed,
             cs.total_for_coin,
             cs.total_sold,
+            cs.total_payout_all,
             cs.user_payout,
             cs.refund_count,
             cs.refund_amount,

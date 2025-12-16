@@ -285,15 +285,21 @@ export default function Payouts() {
                                       <tr className="bg-slate-100">
                                         <th className="px-4 py-2 text-left font-medium text-slate-600">Coin Type</th>
                                         <th className="px-4 py-2 text-right font-medium text-slate-600">You</th>
-                                        <th className="px-4 py-2 text-right font-medium text-slate-600">Total Pool</th>
+                                        <th className="px-4 py-2 text-right font-medium text-slate-600">Pool</th>
                                         <th className="px-4 py-2 text-right font-medium text-slate-600">Sold</th>
                                         <th className="px-4 py-2 text-right font-medium text-slate-600">Your %</th>
+                                        <th className="px-4 py-2 text-right font-medium text-slate-600">Total Profit</th>
                                         <th className="px-4 py-2 text-right font-medium text-slate-600">Your Payout</th>
                                       </tr>
                                     </thead>
                                     <tbody>
-                                      {breakdown.map((row, idx) => (
-                                        <tr key={idx} className="border-t">
+                                      {breakdown.map((row, idx) => {
+                                        const totalPayout = parseFloat(row.total_payout_all) || 0
+                                        const userPayout = parseFloat(row.user_payout) || 0
+                                        const isLoss = totalPayout < 0
+                                        const noSales = parseInt(row.total_sold) === 0
+                                        return (
+                                        <tr key={idx} className={`border-t ${isLoss ? 'bg-red-50' : ''}`}>
                                           <td className="px-4 py-2">
                                             <span className="font-medium text-slate-900">{row.coin_type_name}</span>
                                             {row.batch_name && (
@@ -314,23 +320,37 @@ export default function Payouts() {
                                               {row.share_pct}%
                                             </span>
                                           </td>
+                                          <td className="px-4 py-2 text-right">
+                                            {noSales ? (
+                                              <span className="text-slate-400">—</span>
+                                            ) : isLoss ? (
+                                              <span className="text-red-600 font-medium">{formatCurrency(totalPayout)}</span>
+                                            ) : (
+                                              <span className="text-emerald-600">{formatCurrency(totalPayout)}</span>
+                                            )}
+                                          </td>
                                           <td className="px-4 py-2 text-right font-medium">
-                                            {parseFloat(row.user_payout) > 0 ? (
-                                              <span className="text-emerald-600">{formatCurrency(row.user_payout)}</span>
+                                            {noSales ? (
+                                              <span className="text-slate-400">—</span>
+                                            ) : isLoss ? (
+                                              <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs">Loss</span>
+                                            ) : userPayout > 0 ? (
+                                              <span className="text-emerald-600">{formatCurrency(userPayout)}</span>
                                             ) : (
                                               <span className="text-slate-400">$0.00</span>
                                             )}
                                           </td>
                                         </tr>
-                                      ))}
+                                        )
+                                      })}
                                     </tbody>
                                     <tfoot>
                                       <tr className="border-t bg-slate-50">
-                                        <td colSpan={5} className="px-4 py-2 text-right font-medium text-slate-600">
+                                        <td colSpan={6} className="px-4 py-2 text-right font-medium text-slate-600">
                                           Total Earned:
                                         </td>
                                         <td className="px-4 py-2 text-right font-bold text-emerald-600">
-                                          {formatCurrency(breakdown.reduce((sum, r) => sum + parseFloat(r.user_payout || 0), 0))}
+                                          {formatCurrency(breakdown.reduce((sum, r) => sum + Math.max(0, parseFloat(r.user_payout || 0)), 0))}
                                         </td>
                                       </tr>
                                     </tfoot>
