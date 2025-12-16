@@ -129,34 +129,48 @@ export default function Sales() {
 
       {/* Summary Cards */}
       {summary && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <div className="card p-4">
-            <p className="text-sm text-slate-500">Gross Revenue</p>
-            <p className="text-2xl font-bold text-slate-900">${parseFloat(summary.total_revenue || 0).toLocaleString()}</p>
-            {parseFloat(summary.total_shipping) > 0 && (
-              <p className="text-xs text-amber-600 mt-1">-${parseFloat(summary.total_shipping).toFixed(2)} shipping</p>
-            )}
-          </div>
-          <div className="card p-4">
-            <p className="text-sm text-slate-500">Net Profit</p>
-            <p className={`text-2xl font-bold ${parseFloat(summary.total_profit) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-              {formatCurrency(summary.total_profit)}
-            </p>
-          </div>
-          <div className="card p-4">
-            <p className="text-sm text-slate-500">Your Share (33%)</p>
-            <p className="text-2xl font-bold text-knox-600">${parseFloat(summary.total_profit_share || 0).toLocaleString()}</p>
-          </div>
-          <div className="card p-4">
-            <p className="text-sm text-slate-500">Member Payouts</p>
-            <p className="text-2xl font-bold text-slate-900">${parseFloat(summary.total_payout || 0).toLocaleString()}</p>
-          </div>
-          {parseInt(summary.refund_count) > 0 && (
-            <div className="card p-4 bg-red-50">
-              <p className="text-sm text-red-600">Refunds ({summary.refund_count})</p>
-              <p className="text-2xl font-bold text-red-700">{formatCurrency(summary.refund_total)}</p>
+        <div className="space-y-2">
+          {filters.coinTypeId && (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-slate-500">Showing totals for:</span>
+              <span className="px-3 py-1 bg-knox-100 text-knox-700 rounded-full text-sm font-medium">
+                {coinTypes.find(ct => ct.coin_type_id === parseInt(filters.coinTypeId))?.name || 'Selected Coin'}
+              </span>
             </div>
           )}
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+            <div className="card p-4">
+              <p className="text-sm text-slate-500">Gross Revenue</p>
+              <p className="text-2xl font-bold text-slate-900">${parseFloat(summary.total_revenue || 0).toLocaleString()}</p>
+              {parseFloat(summary.total_shipping) > 0 && (
+                <p className="text-xs text-amber-600 mt-1">-${parseFloat(summary.total_shipping).toFixed(2)} shipping</p>
+              )}
+            </div>
+            <div className="card p-4">
+              <p className="text-sm text-slate-500">Total Cost</p>
+              <p className="text-2xl font-bold text-slate-700">${parseFloat(summary.total_cost || 0).toLocaleString()}</p>
+            </div>
+            <div className="card p-4">
+              <p className="text-sm text-slate-500">Net Profit</p>
+              <p className={`text-2xl font-bold ${parseFloat(summary.total_profit) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                {formatCurrency(summary.total_profit)}
+              </p>
+            </div>
+            <div className="card p-4">
+              <p className="text-sm text-slate-500">Your Share (33%)</p>
+              <p className="text-2xl font-bold text-knox-600">${parseFloat(summary.total_profit_share || 0).toLocaleString()}</p>
+            </div>
+            <div className="card p-4">
+              <p className="text-sm text-slate-500">Member Payouts</p>
+              <p className="text-2xl font-bold text-slate-900">${parseFloat(summary.total_payout || 0).toLocaleString()}</p>
+            </div>
+            {parseInt(summary.refund_count) > 0 && (
+              <div className="card p-4 bg-red-50">
+                <p className="text-sm text-red-600">Refunds ({summary.refund_count})</p>
+                <p className="text-2xl font-bold text-red-700">{formatCurrency(summary.refund_total)}</p>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

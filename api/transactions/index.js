@@ -85,8 +85,8 @@ export default async function handler(req, res) {
       
       const countResult = await query(countSql, countParams);
 
-      // Get summary stats
-      const summaryResult = await query(`
+      // Get summary stats - apply same filters
+      let summarySql = `
         SELECT 
           COUNT(*) FILTER (WHERE COALESCE(is_refund, false) = false) as total_transactions,
           COUNT(*) FILTER (WHERE is_refund = true) as refund_count,
@@ -96,16 +96,44 @@ export default async function handler(req, res) {
           COALESCE(SUM(profit_share), 0) as total_profit_share,
           COALESCE(SUM(payout), 0) as total_payout,
           COALESCE(SUM(quantity_sold) FILTER (WHERE COALESCE(is_refund, false) = false), 0) as total_coins_sold,
-          COALESCE(SUM(payout) FILTER (WHERE is_refund = true), 0) as refund_total
+          COALESCE(SUM(payout) FILTER (WHERE is_refund = true), 0) as refund_total,
+          COALESCE(SUM(coin_cost) FILTER (WHERE COALESCE(is_refund, false) = false), 0) as total_cost
         FROM sales_transactions
-      `);
+        WHERE 1=1
+      `;
+      const summaryParams = [];
+      let summaryParamIndex = 1;
+      
+      if (batchId) {
+        summarySql += ` AND batch_id = $${summaryParamIndex}`;
+        summaryParams.push(batchId);
+        summaryParamIndex++;
+      }
+      if (coinTypeId) {
+        summarySql += ` AND coin_type_id = $${summaryParamIndex}`;
+        summaryParams.push(coinTypeId);
+        summaryParamIndex++;
+      }
+      if (startDate) {
+        summarySql += ` AND sale_date >= $${summaryParamIndex}`;
+        summaryParams.push(startDate);
+        summaryParamIndex++;
+      }
+      if (endDate) {
+        summarySql += ` AND sale_date <= $${summaryParamIndex}`;
+        summaryParams.push(endDate);
+        summaryParamIndex++;
+      }
+      
+      const summaryResult = await query(summarySql, summaryParams);
 
       return res.json({
         transactions: result.rows,
         total: parseInt(countResult.rows[0].total),
         limit: parseInt(limit),
         offset: parseInt(offset),
-        summary: summaryResult.rows[0]
+        summary: summaryResult.rows[0],
+        filtered: !!(coinTypeId || startDate || endDate || batchId)
       });
     }
 
