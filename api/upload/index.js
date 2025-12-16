@@ -116,12 +116,24 @@ export default async function handler(req, res) {
             }
           }
           
+          // Try to find the original order to get its coin_type_id
+          let coinTypeId = null;
+          if (tx.orderNumber) {
+            const originalOrder = await query(
+              'SELECT coin_type_id FROM sales_transactions WHERE order_number = $1 AND (is_refund IS NULL OR is_refund = false) LIMIT 1',
+              [tx.orderNumber]
+            );
+            if (originalOrder.rows.length > 0) {
+              coinTypeId = originalOrder.rows[0].coin_type_id;
+            }
+          }
+          
           // Insert refund as negative transaction
           await query(`
             INSERT INTO sales_transactions (
               order_number, item_title, sale_date, sale_price, total_payout,
-              profit, payout, is_refund, imported_from
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, 'ebay_upload')
+              profit, payout, coin_type_id, is_refund, imported_from
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, 'ebay_upload')
           `, [
             tx.orderNumber || null,
             tx.itemTitle || 'Refund',
@@ -130,6 +142,7 @@ export default async function handler(req, res) {
             tx.totalPayout || 0, // Already negative
             tx.totalPayout || 0, // Negative profit
             tx.totalPayout || 0, // Negative payout
+            coinTypeId
           ]);
           imported++;
           continue;

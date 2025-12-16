@@ -225,28 +225,26 @@ export default function Upload() {
         // Note: eBay's netAmount already has their fees deducted, but shipping is separate
         order.totalPayout = order.netAmount - order.shippingCost
         
-        // Check if this order was refunded
+        // Check if this order was refunded (for display purposes)
         if (refundsByOrder[order.orderNumber]) {
           order.isRefunded = true
           order.refundAmount = refundsByOrder[order.orderNumber].refundAmount
         }
       })
 
-      // Also add standalone refunds (where we don't have the original order in this report)
+      // Add ALL refunds as separate negative transactions
+      // This ensures refunds always offset member earnings
       refunds.forEach(refund => {
-        if (refund.orderNumber && !orders.find(o => o.orderNumber === refund.orderNumber)) {
-          // This is a refund for an order not in this report - add it as negative
-          orders.push({
-            orderNumber: refund.orderNumber,
-            itemTitle: refund.itemTitle || 'Refunded Order',
-            saleDate: refund.saleDate,
-            salePrice: 0,
-            totalPayout: -refund.refundAmount, // Negative payout
-            quantity: 1,
-            type: 'refund',
-            isRefund: true
-          })
-        }
+        orders.push({
+          orderNumber: refund.orderNumber,
+          itemTitle: refund.itemTitle || 'Refund',
+          saleDate: refund.saleDate,
+          salePrice: 0,
+          totalPayout: -refund.refundAmount, // Negative payout
+          quantity: 1,
+          type: 'refund',
+          isRefund: true
+        })
       })
 
       // Get unique titles with counts and total revenue
