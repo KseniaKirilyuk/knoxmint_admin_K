@@ -16,6 +16,8 @@ export default function Batches() {
   const [showUploadModal, setShowUploadModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [showPricesModal, setShowPricesModal] = useState(false)
+  const [showEditContribModal, setShowEditContribModal] = useState(false)
+  const [editContributions, setEditContributions] = useState([])
   
   // Form data
   const [createForm, setCreateForm] = useState({ batchName: '', shipDate: '', grader: '', notes: '' })
@@ -171,6 +173,56 @@ export default function Batches() {
       fetchBatchDetails(selectedBatchId)
     } catch (err) {
       alert('Error saving prices')
+    }
+  }
+
+  // Edit contributions handlers
+  const openEditContribModal = (batchId) => {
+    setSelectedBatchId(batchId)
+    // Create a copy of contributions for editing
+    const contribCopy = (batchDetails?.contributions || []).map(c => ({
+      ...c,
+      originalQuantity: c.quantity
+    }))
+    setEditContributions(contribCopy)
+    setShowEditContribModal(true)
+  }
+
+  const updateContribQuantity = (contribId, newQuantity) => {
+    setEditContributions(prev => 
+      prev.map(c => c.id === contribId ? { ...c, quantity: parseInt(newQuantity) || 0 } : c)
+    )
+  }
+
+  const handleSaveContributions = async () => {
+    try {
+      // Find changed contributions
+      const changed = editContributions.filter(c => c.quantity !== c.originalQuantity)
+      
+      for (const contrib of changed) {
+        await api.put('/batches', { 
+          contributionId: contrib.id, 
+          quantity: contrib.quantity 
+        })
+      }
+      
+      setShowEditContribModal(false)
+      fetchBatchDetails(selectedBatchId)
+      fetchData() // Refresh batch list totals
+    } catch (err) {
+      alert('Error saving contributions')
+    }
+  }
+
+  const handleDeleteContribution = async (contribId) => {
+    if (!confirm('Delete this contribution?')) return
+    try {
+      await api.delete(`/batches?contributionId=${contribId}`)
+      setEditContributions(prev => prev.filter(c => c.id !== contribId))
+      fetchBatchDetails(selectedBatchId)
+      fetchData()
+    } catch (err) {
+      alert('Error deleting contribution')
     }
   }
 
@@ -557,7 +609,16 @@ export default function Batches() {
                   {/* Contributions by Coin Type */}
                   {batchDetails.contributions?.length > 0 ? (
                     <div className="px-6 py-4">
-                      <h4 className="font-medium text-slate-900 mb-3">Contributions</h4>
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="font-medium text-slate-900">Contributions</h4>
+                        <button
+                          onClick={() => openEditContribModal(batch.batch_id)}
+                          className="text-sm text-knox-600 hover:text-knox-700 flex items-center gap-1"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                          Edit
+                        </button>
+                      </div>
                       {Object.entries(groupContributions(batchDetails.contributions)).map(([coinType, data]) => (
                         <div key={coinType} className="mb-4 last:mb-0">
                           <p className="text-sm font-medium text-slate-700 mb-2">{coinType} ({data.total} total)</p>
@@ -973,6 +1034,84 @@ export default function Batches() {
                   </button>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Contributions Modal */}
+      {showEditContribModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <h2 className="text-lg font-semibold">Edit Contributions</h2>
+              <button onClick={() => setShowEditContribModal(false)} className="p-2 hover:bg-slate-100 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6">
+              {editContributions.length === 0 ? (
+                <p className="text-center text-slate-500 py-8">No contributions to edit</p>
+              ) : (
+                <div className="space-y-4">
+                  {Object.entries(
+                    editContributions.reduce((acc, c) => {
+                      const coinName = c.coin_type_name || 'Unknown'
+                      if (!acc[coinName]) acc[coinName] = []
+                      acc[coinName].push(c)
+                      return acc
+                    }, {})
+                  ).map(([coinType, contribs]) => (
+                    <div key={coinType} className="border rounded-lg overflow-hidden">
+                      <div className="bg-slate-50 px-4 py-2 font-medium text-slate-700 text-sm">
+                        {coinType}
+                      </div>
+                      <div className="divide-y">
+                        {contribs.map(contrib => (
+                          <div key={contrib.id} className="px-4 py-3 flex items-center gap-4">
+                            <div className="flex-1">
+                              <p className="font-medium text-slate-900">
+                                {contrib.full_name || contrib.username}
+                              </p>
+                              <p className="text-xs text-slate-500">@{contrib.username}</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="number"
+                                min="0"
+                                className="input w-20 text-center"
+                                value={contrib.quantity}
+                                onChange={(e) => updateContribQuantity(contrib.id, e.target.value)}
+                              />
+                              <button
+                                onClick={() => handleDeleteContribution(contrib.id)}
+                                className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded"
+                                title="Delete contribution"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="px-6 py-4 border-t bg-slate-50 flex gap-3">
+              <button 
+                onClick={() => setShowEditContribModal(false)} 
+                className="btn btn-secondary flex-1"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleSaveContributions} 
+                className="btn btn-primary flex-1"
+              >
+                Save Changes
+              </button>
             </div>
           </div>
         </div>
