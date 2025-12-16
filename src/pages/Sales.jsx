@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Search, Download, ChevronLeft, ChevronRight, Trash2, TrendingUp, TrendingDown, AlertTriangle } from 'lucide-react'
+import { Search, Download, ChevronLeft, ChevronRight, Trash2, TrendingUp, TrendingDown, AlertTriangle, X, Wand2 } from 'lucide-react'
 import api from '../lib/api'
 
 export default function Sales() {
@@ -18,6 +18,12 @@ export default function Sales() {
     limit: 25,
     offset: 0
   })
+  
+  // Bulk mapping state
+  const [showMappingModal, setShowMappingModal] = useState(false)
+  const [unmappedTitles, setUnmappedTitles] = useState([])
+  const [titleMappings, setTitleMappings] = useState({})
+  const [applyingMappings, setApplyingMappings] = useState(false)
 
   useEffect(() => {
     fetchCoinTypes()
@@ -101,6 +107,63 @@ export default function Sales() {
     a.href = url
     a.download = `sales_${new Date().toISOString().split('T')[0]}.csv`
     a.click()
+  }
+
+  // Bulk mapping functions
+  const openMappingModal = async () => {
+    try {
+      const res = await api.get('/transactions?action=unmappedTitles')
+      setUnmappedTitles(res.data)
+      
+      // Auto-suggest mappings based on keywords
+      const suggestions = {}
+      res.data.forEach(item => {
+        const titleLower = item.item_title?.toLowerCase() || ''
+        for (const ct of coinTypes) {
+          const ctNameLower = ct.name.toLowerCase()
+          // Check if coin type name or keywords match
+          if (titleLower.includes(ctNameLower)) {
+            suggestions[item.item_title] = ct.coin_type_id
+            break
+          }
+          if (ct.keywords) {
+            for (const kw of ct.keywords) {
+              if (titleLower.includes(kw.toLowerCase())) {
+                suggestions[item.item_title] = ct.coin_type_id
+                break
+              }
+            }
+          }
+        }
+      })
+      setTitleMappings(suggestions)
+      setShowMappingModal(true)
+    } catch (error) {
+      console.error('Error fetching unmapped titles:', error)
+      alert('Error loading unmapped sales')
+    }
+  }
+
+  const applyMappings = async () => {
+    const mappingsToApply = Object.entries(titleMappings).filter(([_, v]) => v)
+    if (mappingsToApply.length === 0) {
+      alert('Please select at least one mapping')
+      return
+    }
+    
+    setApplyingMappings(true)
+    try {
+      const res = await api.put('/transactions', { mappings: titleMappings })
+      alert(`Successfully updated ${res.data.updated} sales!`)
+      setShowMappingModal(false)
+      setTitleMappings({})
+      fetchTransactions()
+    } catch (error) {
+      console.error('Error applying mappings:', error)
+      alert('Error applying mappings')
+    } finally {
+      setApplyingMappings(false)
+    }
   }
 
   const totalPages = Math.ceil(pagination.total / pagination.limit)
@@ -193,10 +256,17 @@ export default function Sales() {
             <p className="text-amber-600 text-sm">These won't be included in member payout calculations.</p>
           </div>
           <button 
+            onClick={openMappingModal}
+            className="btn btn-primary gap-2"
+          >
+            <Wand2 className="w-4 h-4" />
+            Map Sales
+          </button>
+          <button 
             onClick={() => handleFilterChange('coinTypeId', 'unmapped')}
             className="btn btn-secondary text-amber-700 border-amber-300 hover:bg-amber-100"
           >
-            View Unmapped
+            View
           </button>
         </div>
       )}
@@ -362,6 +432,99 @@ export default function Sales() {
           </div>
         )}
       </div>
+
+      {/* Bulk Mapping Modal */}
+      {showMappingModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col">
+            <div className="px-6 py-4 border-b flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-900">Map Unmapped Sales</h2>
+                <p className="text-sm text-slate-500 mt-1">
+                  {unmappedTitles.length} unique title{unmappedTitles.length !== 1 ? 's' : ''} to map
+                </p>
+              </div>
+              <button 
+                onClick={() => setShowMappingModal(false)}
+                className="p-2 hover:bg-slate-100 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-6">
+              {unmappedTitles.length === 0 ? (
+                <p className="text-slate-500 text-center py-8">No unmapped sales found!</p>
+              ) : (
+                <div className="space-y-4">
+                  {unmappedTitles.map((item, idx) => (
+                    <div key={idx} className="p-4 bg-slate-50 rounded-lg">
+                      <div className="flex items-start gap-4">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-slate-900 truncate" title={item.item_title}>
+                            {item.item_title}
+                          </p>
+                          <p className="text-xs text-slate-500 mt-1">
+                            {item.count} sale{item.count > 1 ? 's' : ''} • ${parseFloat(item.total_revenue).toLocaleString()} revenue
+                          </p>
+                        </div>
+                        <div className="flex-shrink-0 w-64">
+                          <select
+                            className="input w-full text-sm"
+                            value={titleMappings[item.item_title] || ''}
+                            onChange={(e) => setTitleMappings(prev => ({
+                              ...prev,
+                              [item.item_title]: e.target.value ? parseInt(e.target.value) : null
+                            }))}
+                          >
+                            <option value="">— Select coin type —</option>
+                            {coinTypes.map(ct => (
+                              <option key={ct.coin_type_id} value={ct.coin_type_id}>
+                                {ct.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            
+            <div className="px-6 py-4 border-t bg-slate-50 flex items-center justify-between">
+              <p className="text-sm text-slate-500">
+                {Object.values(titleMappings).filter(Boolean).length} of {unmappedTitles.length} mapped
+              </p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setShowMappingModal(false)}
+                  className="btn btn-secondary"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={applyMappings}
+                  disabled={applyingMappings || Object.values(titleMappings).filter(Boolean).length === 0}
+                  className="btn btn-primary gap-2"
+                >
+                  {applyingMappings ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                      Applying...
+                    </>
+                  ) : (
+                    <>
+                      <Wand2 className="w-4 h-4" />
+                      Apply Mappings
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

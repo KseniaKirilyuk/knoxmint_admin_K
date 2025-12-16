@@ -151,6 +151,99 @@ export default async function handler(req, res) {
       });
     }
 
+    // Get unique unmapped titles for bulk mapping
+    if (req.method === 'GET' && req.query.action === 'unmappedTitles') {
+      const result = await query(`
+        SELECT 
+          item_title,
+          COUNT(*) as count,
+          SUM(sale_price) as total_revenue,
+          MIN(sale_date) as first_sale,
+          MAX(sale_date) as last_sale
+        FROM sales_transactions
+        WHERE coin_type_id IS NULL 
+          AND COALESCE(is_refund, false) = false
+          AND item_title IS NOT NULL
+        GROUP BY item_title
+        ORDER BY count DESC
+      `);
+      return res.json(result.rows);
+    }
+
+    // Apply bulk mappings
+    if (req.method === 'PUT') {
+      if (user.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
+      
+      const { mappings } = req.body; // { "item_title": coinTypeId, ... }
+      
+      if (!mappings || typeof mappings !== 'object') {
+        return res.status(400).json({ error: 'Mappings object required' });
+      }
+
+      let updated = 0;
+      
+      for (const [itemTitle, coinTypeId] of Object.entries(mappings)) {
+        if (!coinTypeId) continue;
+        
+        // Get cost_per_coin for this coin type from batch_coins
+        const batchCoin = await query(`
+          SELECT bc.batch_id, bc.cost_per_coin
+          FROM batch_coins bc
+          JOIN batches b ON bc.batch_id = b.batch_id
+          WHERE bc.coin_type_id = $1 
+            AND bc.cost_per_coin IS NOT NULL
+          ORDER BY b.ship_date ASC NULLS LAST, b.created_at ASC
+          LIMIT 1
+        `, [coinTypeId]);
+        
+        const coinCost = batchCoin.rows.length > 0 ? parseFloat(batchCoin.rows[0].cost_per_coin) || 0 : 0;
+        const batchId = batchCoin.rows.length > 0 ? batchCoin.rows[0].batch_id : null;
+        
+        // Update all sales with this title
+        const updateResult = await query(`
+          UPDATE sales_transactions
+          SET 
+            coin_type_id = $1,
+            batch_id = $2,
+            coin_cost = $3 * quantity_sold,
+            profit = total_payout - ($3 * quantity_sold),
+            profit_share = CASE 
+              WHEN total_payout - ($3 * quantity_sold) > 0 
+              THEN GREATEST(0.33 * (total_payout - ($3 * quantity_sold)), 8)
+              ELSE 0 
+            END,
+            payout = CASE 
+              WHEN total_payout - ($3 * quantity_sold) > 0 
+              THEN (total_payout - ($3 * quantity_sold)) - GREATEST(0.33 * (total_payout - ($3 * quantity_sold)), 8)
+              ELSE 0 
+            END,
+            profit_margin = CASE 
+              WHEN sale_price > 0 
+              THEN (total_payout - ($3 * quantity_sold)) / sale_price
+              ELSE 0 
+            END
+          WHERE item_title = $4
+            AND coin_type_id IS NULL
+            AND COALESCE(is_refund, false) = false
+        `, [coinTypeId, batchId, coinCost, itemTitle]);
+        
+        updated += updateResult.rowCount;
+      }
+
+      // Update batch_coins sold counts
+      await query(`
+        UPDATE batch_coins bc
+        SET total_sold = (
+          SELECT COALESCE(SUM(st.quantity_sold), 0)
+          FROM sales_transactions st
+          WHERE st.coin_type_id = bc.coin_type_id
+            AND COALESCE(st.is_refund, false) = false
+        )
+      `);
+
+      return res.json({ success: true, updated });
+    }
+
     if (req.method === 'DELETE') {
       if (user.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
       
