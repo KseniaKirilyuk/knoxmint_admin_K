@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { DollarSign, CheckCircle, Clock, ChevronDown, ChevronRight, Users, Download } from 'lucide-react'
+import { DollarSign, CheckCircle, Clock, ChevronDown, ChevronRight, Users, Download, Pencil, Trash2 } from 'lucide-react'
 import api from '../lib/api'
 
 export default function Payouts() {
@@ -11,6 +11,8 @@ export default function Payouts() {
   const [expandedMembers, setExpandedMembers] = useState({})
   const [payModal, setPayModal] = useState(null)
   const [paymentForm, setPaymentForm] = useState({ amount: '', method: 'Zelle', reference: '', notes: '' })
+  const [editModal, setEditModal] = useState(null)
+  const [editForm, setEditForm] = useState({ amount: '', method: '', reference: '', notes: '', payoutDate: '' })
 
   useEffect(() => {
     fetchData()
@@ -146,6 +148,47 @@ export default function Payouts() {
       fetchData()
     } catch (error) {
       alert('Error recording payment: ' + (error.response?.data?.error || error.message))
+    }
+  }
+
+  const openEditModal = (payout) => {
+    setEditModal(payout)
+    setEditForm({
+      amount: parseFloat(payout.amount || 0).toFixed(2),
+      method: payout.payment_method || 'ACH',
+      reference: payout.payment_reference || '',
+      notes: payout.notes || '',
+      payoutDate: payout.payout_date?.split('T')[0] || ''
+    })
+  }
+
+  const handleEditPayment = async () => {
+    if (!editModal) return
+    
+    try {
+      await api.put('/payouts', {
+        payoutId: editModal.payout_id,
+        amount: parseFloat(editForm.amount),
+        paymentMethod: editForm.method,
+        paymentReference: editForm.reference,
+        notes: editForm.notes,
+        payoutDate: editForm.payoutDate
+      })
+      setEditModal(null)
+      fetchData()
+    } catch (error) {
+      alert('Error updating payment: ' + (error.response?.data?.error || error.message))
+    }
+  }
+
+  const handleDeletePayment = async (payoutId) => {
+    if (!confirm('Delete this payment record? This will restore the balance owed to the member.')) return
+    
+    try {
+      await api.delete(`/payouts?payoutId=${payoutId}`)
+      fetchData()
+    } catch (error) {
+      alert('Error deleting payment: ' + (error.response?.data?.error || error.message))
     }
   }
 
@@ -451,12 +494,13 @@ export default function Payouts() {
                 <th className="table-header">Method</th>
                 <th className="table-header">Reference</th>
                 <th className="table-header">Status</th>
+                <th className="table-header text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {paymentHistory.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="table-cell text-center py-8 text-slate-500">
+                  <td colSpan={7} className="table-cell text-center py-8 text-slate-500">
                     No payment history yet
                   </td>
                 </tr>
@@ -485,6 +529,24 @@ export default function Payouts() {
                       }`}>
                         {payout.status}
                       </span>
+                    </td>
+                    <td className="table-cell text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => openEditModal(payout)}
+                          className="p-1.5 text-slate-400 hover:text-knox-600 hover:bg-slate-100 rounded"
+                          title="Edit payment"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeletePayment(payout.payout_id)}
+                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded"
+                          title="Delete payment"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -645,6 +707,93 @@ export default function Payouts() {
                 disabled={!paymentForm.amount || parseFloat(paymentForm.amount) <= 0}
               >
                 Record Payment
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Payment Modal */}
+      {editModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4">
+            <div className="px-6 py-4 border-b">
+              <h2 className="text-lg font-semibold">Edit Payment</h2>
+              <p className="text-sm text-slate-500">
+                {editModal.full_name || editModal.username}
+              </p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="label">Date</label>
+                <input
+                  type="date"
+                  className="input"
+                  value={editForm.payoutDate}
+                  onChange={(e) => setEditForm({ ...editForm, payoutDate: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="label">Amount</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="input pl-7"
+                    value={editForm.amount}
+                    onChange={(e) => setEditForm({ ...editForm, amount: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="label">Payment Method</label>
+                <select
+                  className="input"
+                  value={editForm.method}
+                  onChange={(e) => setEditForm({ ...editForm, method: e.target.value })}
+                >
+                  <option value="ACH">ACH Transfer</option>
+                  <option value="Wire">Wire Transfer</option>
+                  <option value="Zelle">Zelle</option>
+                  <option value="PayPal">PayPal</option>
+                  <option value="Venmo">Venmo</option>
+                  <option value="Check">Check</option>
+                  <option value="Cash">Cash</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label className="label">Reference # (optional)</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="Transaction ID, confirmation number, etc."
+                  value={editForm.reference}
+                  onChange={(e) => setEditForm({ ...editForm, reference: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="label">Notes (optional)</label>
+                <textarea
+                  className="input"
+                  rows={2}
+                  placeholder="Any additional notes..."
+                  value={editForm.notes}
+                  onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t bg-slate-50 flex gap-3">
+              <button onClick={() => setEditModal(null)} className="btn btn-secondary flex-1">
+                Cancel
+              </button>
+              <button 
+                onClick={handleEditPayment} 
+                className="btn btn-primary flex-1"
+                disabled={!editForm.amount || parseFloat(editForm.amount) <= 0}
+              >
+                Save Changes
               </button>
             </div>
           </div>

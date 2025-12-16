@@ -186,6 +186,46 @@ export default async function handler(req, res) {
       return res.status(201).json(result.rows[0]);
     }
 
+    if (req.method === 'PUT') {
+      if (user.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
+      
+      const { payoutId, amount, paymentMethod, paymentReference, notes, payoutDate } = req.body;
+
+      if (!payoutId) {
+        return res.status(400).json({ error: 'Payout ID required' });
+      }
+
+      const result = await query(
+        `UPDATE payouts 
+         SET amount = COALESCE($2, amount),
+             payment_method = COALESCE($3, payment_method),
+             payment_reference = COALESCE($4, payment_reference),
+             notes = COALESCE($5, notes),
+             payout_date = COALESCE($6, payout_date)
+         WHERE payout_id = $1
+         RETURNING *`,
+        [payoutId, amount, paymentMethod, paymentReference, notes, payoutDate]
+      );
+      
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Payout not found' });
+      }
+      return res.json(result.rows[0]);
+    }
+
+    if (req.method === 'DELETE') {
+      if (user.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
+      
+      const { payoutId } = req.query;
+
+      if (!payoutId) {
+        return res.status(400).json({ error: 'Payout ID required' });
+      }
+
+      await query('DELETE FROM payouts WHERE payout_id = $1', [payoutId]);
+      return res.json({ success: true });
+    }
+
     res.status(405).json({ error: 'Method not allowed' });
   } catch (error) {
     console.error('Payouts error:', error);
