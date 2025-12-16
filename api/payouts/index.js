@@ -92,32 +92,43 @@ export default async function handler(req, res) {
       // Get breakdown for a specific member
       if (action === 'memberBreakdown' && userId) {
         const result = await query(`
-          WITH contribution_shares AS (
+          WITH coin_totals AS (
+            -- Get total contributions per coin type across ALL users
+            SELECT 
+              coin_type_id,
+              SUM(quantity) as total_for_coin
+            FROM user_contributions
+            WHERE quantity > 0
+            GROUP BY coin_type_id
+          ),
+          user_contribs AS (
+            -- Get this user's contributions with their share
             SELECT 
               uc.user_id,
               uc.batch_id,
               uc.coin_type_id,
               uc.quantity as user_contributed,
-              SUM(uc.quantity) OVER (PARTITION BY uc.coin_type_id) as total_for_coin,
-              uc.quantity::decimal / NULLIF(SUM(uc.quantity) OVER (PARTITION BY uc.coin_type_id), 0) as share_pct
+              ct.total_for_coin,
+              uc.quantity::decimal / NULLIF(ct.total_for_coin, 0) as share_pct
             FROM user_contributions uc
+            JOIN coin_totals ct ON uc.coin_type_id = ct.coin_type_id
             WHERE uc.user_id = $1 AND uc.quantity > 0
           ),
           coin_sales AS (
             SELECT 
-              cs.batch_id,
-              cs.coin_type_id,
-              cs.user_contributed,
-              cs.total_for_coin,
-              cs.share_pct,
+              uc.batch_id,
+              uc.coin_type_id,
+              uc.user_contributed,
+              uc.total_for_coin,
+              uc.share_pct,
               COUNT(CASE WHEN COALESCE(st.is_refund, false) = false THEN st.transaction_id END) as sales_count,
               COUNT(CASE WHEN st.is_refund = true THEN st.transaction_id END) as refund_count,
               COALESCE(SUM(st.quantity_sold), 0) as total_sold,
-              COALESCE(SUM(st.payout * cs.share_pct), 0) as user_payout,
-              COALESCE(SUM(CASE WHEN st.is_refund = true THEN st.payout * cs.share_pct ELSE 0 END), 0) as refund_amount
-            FROM contribution_shares cs
-            LEFT JOIN sales_transactions st ON cs.coin_type_id = st.coin_type_id
-            GROUP BY cs.batch_id, cs.coin_type_id, cs.user_contributed, cs.total_for_coin, cs.share_pct
+              COALESCE(SUM(st.payout * uc.share_pct), 0) as user_payout,
+              COALESCE(SUM(CASE WHEN st.is_refund = true THEN st.payout * uc.share_pct ELSE 0 END), 0) as refund_amount
+            FROM user_contribs uc
+            LEFT JOIN sales_transactions st ON uc.coin_type_id = st.coin_type_id
+            GROUP BY uc.batch_id, uc.coin_type_id, uc.user_contributed, uc.total_for_coin, uc.share_pct
           )
           SELECT 
             b.batch_id,
