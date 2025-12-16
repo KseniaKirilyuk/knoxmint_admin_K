@@ -399,9 +399,26 @@ export default function Upload() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Import eBay Sales</h1>
-        <p className="text-slate-500 mt-1">Upload your eBay transaction report and map items to coin types</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Import eBay Sales</h1>
+          <p className="text-slate-500 mt-1">Upload your eBay transaction report and map items to coin types</p>
+        </div>
+        <button 
+          onClick={async () => {
+            if (confirm('Delete ALL sales transactions? This cannot be undone.')) {
+              try {
+                await api.delete('/upload?action=clearAll')
+                alert('All sales cleared. You can now re-import.')
+              } catch (err) {
+                alert('Error clearing sales: ' + (err.response?.data?.error || err.message))
+              }
+            }
+          }}
+          className="btn btn-secondary text-red-600 hover:bg-red-50"
+        >
+          Clear All Sales
+        </button>
       </div>
 
       {!parsedData && !results && (

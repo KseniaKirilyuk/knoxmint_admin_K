@@ -24,6 +24,22 @@ export default async function handler(req, res) {
   if (!user) return res.status(401).json({ error: 'Authentication required' });
   if (user.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
 
+  // Handle DELETE - clear all sales
+  if (req.method === 'DELETE') {
+    const { action } = req.query;
+    if (action === 'clearAll') {
+      try {
+        await query('DELETE FROM sales_transactions');
+        // Reset batch_coins sold counts
+        await query('UPDATE batch_coins SET total_sold = 0');
+        return res.json({ success: true, message: 'All sales transactions cleared' });
+      } catch (error) {
+        return res.status(500).json({ error: 'Failed to clear sales: ' + error.message });
+      }
+    }
+    return res.status(400).json({ error: 'Invalid action' });
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
