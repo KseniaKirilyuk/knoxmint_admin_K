@@ -49,14 +49,86 @@ export default function Payouts() {
     }
   }
 
-  const openPayModal = (member) => {
+  const openPayModal = async (member) => {
     setPayModal(member)
     setPaymentForm({ 
       amount: parseFloat(member.balance || 0).toFixed(2), 
-      method: 'Zelle', 
+      method: 'ACH', 
       reference: '', 
-      notes: '' 
+      notes: '',
+      paymentType: 'total', // 'total', 'byCoin', 'custom'
+      selectedCoins: {}
     })
+    
+    // Fetch breakdown if not already loaded
+    if (!memberBreakdowns[member.user_id]) {
+      try {
+        const res = await api.get(`/payouts?action=memberBreakdown&userId=${member.user_id}`)
+        setMemberBreakdowns(prev => ({ ...prev, [member.user_id]: res.data }))
+      } catch (error) {
+        console.error('Error fetching breakdown:', error)
+      }
+    }
+  }
+
+  const updatePaymentType = (type) => {
+    if (!payModal) return
+    const breakdown = memberBreakdowns[payModal.user_id] || []
+    
+    if (type === 'total') {
+      setPaymentForm(prev => ({
+        ...prev,
+        paymentType: type,
+        amount: parseFloat(payModal.balance || 0).toFixed(2),
+        selectedCoins: {}
+      }))
+    } else if (type === 'byCoin') {
+      // Pre-select all coins with positive payouts
+      const selected = {}
+      breakdown.forEach(row => {
+        if (parseFloat(row.user_payout) > 0) {
+          selected[row.coin_type_id] = true
+        }
+      })
+      const total = breakdown
+        .filter(row => selected[row.coin_type_id])
+        .reduce((sum, row) => sum + Math.max(0, parseFloat(row.user_payout || 0)), 0)
+      setPaymentForm(prev => ({
+        ...prev,
+        paymentType: type,
+        amount: total.toFixed(2),
+        selectedCoins: selected
+      }))
+    } else {
+      setPaymentForm(prev => ({
+        ...prev,
+        paymentType: type,
+        amount: '',
+        selectedCoins: {}
+      }))
+    }
+  }
+
+  const toggleCoinSelection = (coinTypeId, userPayout) => {
+    if (!payModal) return
+    const breakdown = memberBreakdowns[payModal.user_id] || []
+    
+    const newSelected = { ...paymentForm.selectedCoins }
+    if (newSelected[coinTypeId]) {
+      delete newSelected[coinTypeId]
+    } else {
+      newSelected[coinTypeId] = true
+    }
+    
+    const total = breakdown
+      .filter(row => newSelected[row.coin_type_id])
+      .reduce((sum, row) => sum + Math.max(0, parseFloat(row.user_payout || 0)), 0)
+    
+    setPaymentForm(prev => ({
+      ...prev,
+      selectedCoins: newSelected,
+      amount: total.toFixed(2)
+    }))
   }
 
   const handlePayment = async () => {
@@ -425,16 +497,90 @@ export default function Payouts() {
       {/* Payment Modal */}
       {payModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 max-h-[90vh] flex flex-col">
             <div className="px-6 py-4 border-b">
               <h2 className="text-lg font-semibold">Record Payment</h2>
               <p className="text-sm text-slate-500">
                 Pay {payModal.full_name || payModal.username}
               </p>
             </div>
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 overflow-y-auto flex-1">
+              {/* Payment Type Selection */}
               <div>
-                <label className="label">Amount</label>
+                <label className="label">Payment Amount</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => updatePaymentType('total')}
+                    className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                      paymentForm.paymentType === 'total'
+                        ? 'bg-knox-600 text-white border-knox-600'
+                        : 'bg-white text-slate-700 border-slate-300 hover:border-knox-400'
+                    }`}
+                  >
+                    Total Balance
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => updatePaymentType('byCoin')}
+                    className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                      paymentForm.paymentType === 'byCoin'
+                        ? 'bg-knox-600 text-white border-knox-600'
+                        : 'bg-white text-slate-700 border-slate-300 hover:border-knox-400'
+                    }`}
+                  >
+                    By Coin Type
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => updatePaymentType('custom')}
+                    className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                      paymentForm.paymentType === 'custom'
+                        ? 'bg-knox-600 text-white border-knox-600'
+                        : 'bg-white text-slate-700 border-slate-300 hover:border-knox-400'
+                    }`}
+                  >
+                    Custom
+                  </button>
+                </div>
+              </div>
+
+              {/* Coin Type Selection (when byCoin is selected) */}
+              {paymentForm.paymentType === 'byCoin' && memberBreakdowns[payModal.user_id] && (
+                <div className="border rounded-lg overflow-hidden">
+                  <div className="bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600 border-b">
+                    Select coin types to pay
+                  </div>
+                  <div className="max-h-48 overflow-y-auto">
+                    {memberBreakdowns[payModal.user_id]
+                      .filter(row => parseFloat(row.user_payout) > 0)
+                      .map((row, idx) => (
+                        <label
+                          key={idx}
+                          className="flex items-center gap-3 px-3 py-2 hover:bg-slate-50 cursor-pointer border-b last:border-b-0"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={!!paymentForm.selectedCoins[row.coin_type_id]}
+                            onChange={() => toggleCoinSelection(row.coin_type_id, row.user_payout)}
+                            className="rounded border-slate-300 text-knox-600 focus:ring-knox-500"
+                          />
+                          <span className="flex-1 text-sm">{row.coin_type_name}</span>
+                          <span className="text-sm font-medium text-emerald-600">
+                            {formatCurrency(row.user_payout)}
+                          </span>
+                        </label>
+                      ))}
+                    {memberBreakdowns[payModal.user_id].filter(row => parseFloat(row.user_payout) > 0).length === 0 && (
+                      <p className="px-3 py-4 text-sm text-slate-500 text-center">No positive payouts available</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Amount Display/Input */}
+              <div>
+                <label className="label">Amount to Pay</label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
                   <input
@@ -443,12 +589,14 @@ export default function Payouts() {
                     className="input pl-7"
                     value={paymentForm.amount}
                     onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
+                    readOnly={paymentForm.paymentType !== 'custom'}
                   />
                 </div>
                 <p className="text-xs text-slate-500 mt-1">
-                  Balance owed: {formatCurrency(payModal.balance)}
+                  Total balance owed: {formatCurrency(payModal.balance)}
                 </p>
               </div>
+
               <div>
                 <label className="label">Payment Method</label>
                 <select
@@ -456,12 +604,13 @@ export default function Payouts() {
                   value={paymentForm.method}
                   onChange={(e) => setPaymentForm({ ...paymentForm, method: e.target.value })}
                 >
+                  <option value="ACH">ACH Transfer</option>
+                  <option value="Wire">Wire Transfer</option>
                   <option value="Zelle">Zelle</option>
                   <option value="PayPal">PayPal</option>
                   <option value="Venmo">Venmo</option>
                   <option value="Check">Check</option>
                   <option value="Cash">Cash</option>
-                  <option value="Wire">Wire Transfer</option>
                   <option value="Other">Other</option>
                 </select>
               </div>
@@ -470,7 +619,7 @@ export default function Payouts() {
                 <input
                   type="text"
                   className="input"
-                  placeholder="Transaction ID, check number, etc."
+                  placeholder="Transaction ID, confirmation number, etc."
                   value={paymentForm.reference}
                   onChange={(e) => setPaymentForm({ ...paymentForm, reference: e.target.value })}
                 />
@@ -485,14 +634,18 @@ export default function Payouts() {
                   onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}
                 />
               </div>
-              <div className="flex gap-3 pt-4">
-                <button onClick={() => setPayModal(null)} className="btn btn-secondary flex-1">
-                  Cancel
-                </button>
-                <button onClick={handlePayment} className="btn btn-primary flex-1">
-                  Record Payment
-                </button>
-              </div>
+            </div>
+            <div className="px-6 py-4 border-t bg-slate-50 flex gap-3">
+              <button onClick={() => setPayModal(null)} className="btn btn-secondary flex-1">
+                Cancel
+              </button>
+              <button 
+                onClick={handlePayment} 
+                className="btn btn-primary flex-1"
+                disabled={!paymentForm.amount || parseFloat(paymentForm.amount) <= 0}
+              >
+                Record Payment
+              </button>
             </div>
           </div>
         </div>
