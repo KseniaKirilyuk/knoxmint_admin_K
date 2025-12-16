@@ -9,6 +9,17 @@ function verifyToken(req) {
   } catch { return null; }
 }
 
+// Ensure cost_per_coin column exists and migrate old prices (idempotent)
+async function ensureCostColumn() {
+  try {
+    await query(`ALTER TABLE batch_coins ADD COLUMN IF NOT EXISTS cost_per_coin DECIMAL(10, 2)`);
+    // Migrate old prices if they exist
+    await query(`UPDATE batch_coins SET cost_per_coin = original_price WHERE cost_per_coin IS NULL AND original_price IS NOT NULL`);
+  } catch (e) {
+    // Ignore - column may already exist or original_price may not exist
+  }
+}
+
 export default async function handler(req, res) {
   const user = verifyToken(req);
   if (!user) return res.status(401).json({ error: 'Authentication required' });
@@ -26,6 +37,8 @@ export default async function handler(req, res) {
 
       // Get batch details with coins and contributions
       if (action === 'details' && batchId) {
+        await ensureCostColumn();
+        
         const batchResult = await query('SELECT * FROM batches WHERE batch_id = $1', [batchId]);
         if (batchResult.rows.length === 0) {
           return res.status(404).json({ error: 'Batch not found' });
@@ -314,12 +327,15 @@ export default async function handler(req, res) {
 
       // Update coin prices in batch (simple cost_per_coin)
       if (batchId && coinPrices) {
+        await ensureCostColumn();
+        
         for (const [coinTypeId, price] of Object.entries(coinPrices)) {
+          const priceValue = price === '' || price === null || price === undefined ? null : parseFloat(price);
           await query(`
             UPDATE batch_coins 
             SET cost_per_coin = $1, updated_at = CURRENT_TIMESTAMP
             WHERE batch_id = $2 AND coin_type_id = $3
-          `, [price || null, batchId, coinTypeId]);
+          `, [priceValue, batchId, coinTypeId]);
         }
         return res.json({ success: true });
       }
