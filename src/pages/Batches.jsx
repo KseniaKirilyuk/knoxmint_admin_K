@@ -18,6 +18,7 @@ export default function Batches() {
   const [showPricesModal, setShowPricesModal] = useState(false)
   const [showEditContribModal, setShowEditContribModal] = useState(false)
   const [editContributions, setEditContributions] = useState([])
+  const [newContrib, setNewContrib] = useState({ userId: '', coinTypeId: '', quantity: 1 })
   
   // Form data
   const [createForm, setCreateForm] = useState({ batchName: '', shipDate: '', grader: '', notes: '' })
@@ -223,6 +224,40 @@ export default function Batches() {
       fetchData()
     } catch (err) {
       alert('Error deleting contribution')
+    }
+  }
+
+  const handleAddContribution = async () => {
+    if (!newContrib.userId || !newContrib.coinTypeId || !newContrib.quantity) {
+      alert('Please select user, coin type, and quantity')
+      return
+    }
+    
+    try {
+      await api.post('/batches?action=addContribution', {
+        batchId: selectedBatchId,
+        userId: parseInt(newContrib.userId),
+        coinTypeId: parseInt(newContrib.coinTypeId),
+        quantity: parseInt(newContrib.quantity)
+      })
+      
+      // Reset form
+      setNewContrib({ userId: '', coinTypeId: '', quantity: 1 })
+      
+      // Fetch fresh batch details
+      const res = await api.get(`/batches?batchId=${selectedBatchId}`)
+      setBatchDetails(res.data)
+      
+      // Update editContributions with fresh data
+      const contribCopy = (res.data?.contributions || []).map(c => ({
+        ...c,
+        originalQuantity: c.quantity
+      }))
+      setEditContributions(contribCopy)
+      
+      fetchData()
+    } catch (err) {
+      alert('Error adding contribution: ' + (err.response?.data?.error || err.message))
     }
   }
 
@@ -1050,8 +1085,68 @@ export default function Batches() {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-6">
+              {/* Add New Contribution */}
+              <div className="mb-6 p-4 bg-knox-50 rounded-lg border border-knox-200">
+                <h4 className="font-medium text-slate-900 mb-3 flex items-center gap-2">
+                  <Plus className="w-4 h-4" />
+                  Add Contribution
+                </h4>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="label text-xs">Member</label>
+                    <select
+                      className="input text-sm"
+                      value={newContrib.userId}
+                      onChange={(e) => setNewContrib({ ...newContrib, userId: e.target.value })}
+                    >
+                      <option value="">Select member...</option>
+                      {users.map(u => (
+                        <option key={u.user_id} value={u.user_id}>
+                          {u.full_name || u.username}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label text-xs">Coin Type</label>
+                    <select
+                      className="input text-sm"
+                      value={newContrib.coinTypeId}
+                      onChange={(e) => setNewContrib({ ...newContrib, coinTypeId: e.target.value })}
+                    >
+                      <option value="">Select coin...</option>
+                      {coinTypes.map(ct => (
+                        <option key={ct.coin_type_id} value={ct.coin_type_id}>
+                          {ct.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label text-xs">Quantity</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        min="1"
+                        className="input text-sm flex-1"
+                        value={newContrib.quantity}
+                        onChange={(e) => setNewContrib({ ...newContrib, quantity: e.target.value })}
+                      />
+                      <button
+                        onClick={handleAddContribution}
+                        className="btn btn-primary text-sm px-3"
+                        disabled={!newContrib.userId || !newContrib.coinTypeId}
+                      >
+                        Add
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Existing Contributions */}
               {editContributions.length === 0 ? (
-                <p className="text-center text-slate-500 py-8">No contributions to edit</p>
+                <p className="text-center text-slate-500 py-8">No contributions yet</p>
               ) : (
                 <div className="space-y-4">
                   {Object.entries(

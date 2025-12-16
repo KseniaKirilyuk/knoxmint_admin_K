@@ -113,6 +113,58 @@ export default async function handler(req, res) {
         return res.status(201).json(result.rows[0]);
       }
 
+      // Add single contribution
+      if (action === 'addContribution') {
+        const { batchId, userId, coinTypeId, quantity } = req.body;
+        if (!batchId || !userId || !coinTypeId || !quantity) {
+          return res.status(400).json({ error: 'Batch ID, user ID, coin type ID, and quantity required' });
+        }
+
+        // Check if user already has contribution for this coin type in this batch
+        const existing = await query(
+          'SELECT id, quantity FROM user_contributions WHERE batch_id = $1 AND user_id = $2 AND coin_type_id = $3',
+          [batchId, userId, coinTypeId]
+        );
+
+        if (existing.rows.length > 0) {
+          // Update existing
+          await query(
+            'UPDATE user_contributions SET quantity = quantity + $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+            [quantity, existing.rows[0].id]
+          );
+        } else {
+          // Insert new
+          await query(
+            'INSERT INTO user_contributions (user_id, batch_id, coin_type_id, quantity) VALUES ($1, $2, $3, $4)',
+            [userId, batchId, coinTypeId, quantity]
+          );
+        }
+
+        // Update batch_coins
+        const bcExists = await query(
+          'SELECT 1 FROM batch_coins WHERE batch_id = $1 AND coin_type_id = $2',
+          [batchId, coinTypeId]
+        );
+        
+        if (bcExists.rows.length === 0) {
+          await query(
+            'INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed) VALUES ($1, $2, $3)',
+            [batchId, coinTypeId, quantity]
+          );
+        } else {
+          await query(`
+            UPDATE batch_coins 
+            SET total_contributed = (
+              SELECT COALESCE(SUM(quantity), 0) FROM user_contributions 
+              WHERE batch_id = $1 AND coin_type_id = $2
+            )
+            WHERE batch_id = $1 AND coin_type_id = $2
+          `, [batchId, coinTypeId]);
+        }
+
+        return res.json({ success: true });
+      }
+
       // Upload contributions for a batch
       if (action === 'uploadContributions') {
         const { batchId, contributions, coinPrices, coinMappings } = req.body;
