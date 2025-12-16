@@ -88,12 +88,15 @@ export default async function handler(req, res) {
       // Get summary stats
       const summaryResult = await query(`
         SELECT 
-          COUNT(*) as total_transactions,
-          COALESCE(SUM(sale_price), 0) as total_revenue,
+          COUNT(*) FILTER (WHERE COALESCE(is_refund, false) = false) as total_transactions,
+          COUNT(*) FILTER (WHERE is_refund = true) as refund_count,
+          COALESCE(SUM(sale_price) FILTER (WHERE COALESCE(is_refund, false) = false), 0) as total_revenue,
+          COALESCE(SUM(shipping_cost) FILTER (WHERE COALESCE(is_refund, false) = false), 0) as total_shipping,
           COALESCE(SUM(profit), 0) as total_profit,
           COALESCE(SUM(profit_share), 0) as total_profit_share,
           COALESCE(SUM(payout), 0) as total_payout,
-          COALESCE(SUM(quantity_sold), 0) as total_coins_sold
+          COALESCE(SUM(quantity_sold) FILTER (WHERE COALESCE(is_refund, false) = false), 0) as total_coins_sold,
+          COALESCE(SUM(payout) FILTER (WHERE is_refund = true), 0) as refund_total
         FROM sales_transactions
       `);
 

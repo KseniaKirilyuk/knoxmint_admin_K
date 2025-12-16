@@ -9,6 +9,16 @@ function verifyToken(req) {
   } catch { return null; }
 }
 
+// Ensure refund columns exist (idempotent)
+async function ensureRefundColumns() {
+  try {
+    await query(`ALTER TABLE sales_transactions ADD COLUMN IF NOT EXISTS is_refund BOOLEAN DEFAULT false`);
+    await query(`ALTER TABLE sales_transactions ADD COLUMN IF NOT EXISTS is_refunded BOOLEAN DEFAULT false`);
+  } catch (e) {
+    // Ignore - columns may already exist
+  }
+}
+
 export default async function handler(req, res) {
   const user = verifyToken(req);
   if (!user) return res.status(401).json({ error: 'Authentication required' });
@@ -19,6 +29,9 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Ensure database has refund columns
+    await ensureRefundColumns();
+    
     const { transactions, titleMappings } = req.body;
     
     if (!transactions || !Array.isArray(transactions)) {
@@ -89,13 +102,46 @@ export default async function handler(req, res) {
 
     for (const tx of transactions) {
       try {
-        // Skip if no sale price
+        // Handle refund transactions (negative payout, offset previous sales)
+        if (tx.isRefund || tx.type === 'refund') {
+          // Check if this refund already exists
+          if (tx.orderNumber) {
+            const existing = await query(
+              'SELECT transaction_id FROM sales_transactions WHERE order_number = $1 AND is_refund = true',
+              [tx.orderNumber]
+            );
+            if (existing.rows.length > 0) {
+              skipped++;
+              continue;
+            }
+          }
+          
+          // Insert refund as negative transaction
+          await query(`
+            INSERT INTO sales_transactions (
+              order_number, item_title, sale_date, sale_price, total_payout,
+              profit, payout, is_refund, imported_from
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, 'ebay_upload')
+          `, [
+            tx.orderNumber || null,
+            tx.itemTitle || 'Refund',
+            tx.saleDate || new Date().toISOString().split('T')[0],
+            0,
+            tx.totalPayout || 0, // Already negative
+            tx.totalPayout || 0, // Negative profit
+            tx.totalPayout || 0, // Negative payout
+          ]);
+          imported++;
+          continue;
+        }
+
+        // Skip if no sale price (but allow refunds above)
         if (!tx.salePrice || tx.salePrice <= 0) continue;
 
         // Check for duplicate by order number
         if (tx.orderNumber) {
           const existing = await query(
-            'SELECT transaction_id FROM sales_transactions WHERE order_number = $1',
+            'SELECT transaction_id FROM sales_transactions WHERE order_number = $1 AND (is_refund IS NULL OR is_refund = false)',
             [tx.orderNumber]
           );
           if (existing.rows.length > 0) {
@@ -129,19 +175,25 @@ export default async function handler(req, res) {
           }
         }
 
-        // Calculate values
+        // Calculate values - shipping is now subtracted from payout
         const salePrice = parseFloat(tx.salePrice) || 0;
         const ebayFee = Math.abs(parseFloat(tx.ebayFee) || 0);
         const advertisingFee = Math.abs(parseFloat(tx.advertisingFee) || 0);
         const shippingCost = Math.abs(parseFloat(tx.shippingCost) || 0);
         const quantity = parseInt(tx.quantity) || 1;
         
-        const totalPayout = parseFloat(tx.totalPayout) || (salePrice - ebayFee - advertisingFee);
+        // totalPayout from frontend already has shipping subtracted
+        const totalPayout = parseFloat(tx.totalPayout) || (salePrice - ebayFee - advertisingFee - shippingCost);
         const totalCoinCost = coinCost * quantity;
+        
+        // Profit = what we received after all costs (including shipping)
         const profit = totalPayout - totalCoinCost;
         const profitShare = profit > 0 ? Math.max(0.33 * profit, 8) : 0;
         const payout = profit - profitShare;
         const profitMargin = salePrice > 0 ? (profit / salePrice) : 0;
+
+        // Mark if this order was refunded
+        const isRefunded = tx.isRefunded || false;
 
         // Insert transaction
         await query(`
@@ -149,8 +201,8 @@ export default async function handler(req, res) {
             batch_id, coin_type_id, listing_id, order_number, item_title, sale_date,
             sale_price, ebay_fee, advertising_fee, shipping_cost, total_payout,
             coin_cost, profit, profit_share, payout, profit_margin,
-            grade, quantity_sold, imported_from
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+            grade, quantity_sold, imported_from, is_refunded
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
         `, [
           batchId,
           coinTypeId,
@@ -170,7 +222,8 @@ export default async function handler(req, res) {
           profitMargin,
           tx.grade || null,
           quantity,
-          'ebay_upload'
+          'ebay_upload',
+          isRefunded
         ]);
 
         // Update batch_coins sold count

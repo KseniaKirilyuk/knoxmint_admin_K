@@ -22,6 +22,7 @@ export default async function handler(req, res) {
         // Step 1: Calculate each user's share per coin type
         // share = user's contribution / total contributions for that coin type
         // Step 2: For each sale, user gets: sale.payout * their share
+        // Note: Refunds have negative payout values and will offset earnings
         const result = await query(`
           WITH contribution_shares AS (
             -- Each user's share percentage per coin type
@@ -36,15 +37,17 @@ export default async function handler(req, res) {
             GROUP BY uc.user_id, uc.coin_type_id
           ),
           sale_splits AS (
-            -- For each sale, calculate each user's portion based on their share
+            -- For each sale/refund, calculate each user's portion based on their share
+            -- Refunds have negative payout and will reduce earnings
             SELECT 
               cs.user_id,
               st.transaction_id,
               st.payout * cs.share_pct as user_payout,
-              st.is_paid_out
+              st.is_paid_out,
+              COALESCE(st.is_refund, false) as is_refund
             FROM sales_transactions st
             JOIN contribution_shares cs ON st.coin_type_id = cs.coin_type_id
-            WHERE st.payout > 0
+            WHERE st.payout != 0 OR st.is_refund = true
           ),
           user_totals AS (
             SELECT 
@@ -52,7 +55,9 @@ export default async function handler(req, res) {
               COALESCE(SUM(user_payout), 0) as total_earned,
               COALESCE(SUM(CASE WHEN is_paid_out = false THEN user_payout ELSE 0 END), 0) as unpaid,
               COALESCE(SUM(CASE WHEN is_paid_out = true THEN user_payout ELSE 0 END), 0) as paid_from_sales,
-              COUNT(DISTINCT transaction_id) as sale_count
+              COUNT(DISTINCT CASE WHEN is_refund = false THEN transaction_id END) as sale_count,
+              COUNT(DISTINCT CASE WHEN is_refund = true THEN transaction_id END) as refund_count,
+              COALESCE(SUM(CASE WHEN is_refund = true THEN user_payout ELSE 0 END), 0) as refund_total
             FROM sale_splits
             GROUP BY user_id
           )
@@ -64,12 +69,14 @@ export default async function handler(req, res) {
             COALESCE(ut.total_earned, 0) as total_earned,
             COALESCE(ut.unpaid, 0) as unpaid,
             COALESCE((SELECT SUM(amount) FROM payouts WHERE user_id = u.user_id AND status = 'Paid'), 0) as total_paid,
-            COALESCE(ut.sale_count, 0) as sale_count
+            COALESCE(ut.sale_count, 0) as sale_count,
+            COALESCE(ut.refund_count, 0) as refund_count,
+            COALESCE(ut.refund_total, 0) as refund_total
           FROM users u
           LEFT JOIN user_contributions uc ON u.user_id = uc.user_id
           LEFT JOIN user_totals ut ON u.user_id = ut.user_id
-          GROUP BY u.user_id, u.username, u.full_name, ut.total_earned, ut.unpaid, ut.sale_count
-          HAVING COALESCE(SUM(uc.quantity), 0) > 0 OR COALESCE(ut.total_earned, 0) > 0
+          GROUP BY u.user_id, u.username, u.full_name, ut.total_earned, ut.unpaid, ut.sale_count, ut.refund_count, ut.refund_total
+          HAVING COALESCE(SUM(uc.quantity), 0) > 0 OR COALESCE(ut.total_earned, 0) != 0
           ORDER BY COALESCE(ut.unpaid, 0) DESC, u.full_name
         `);
         
@@ -103,9 +110,11 @@ export default async function handler(req, res) {
               cs.user_contributed,
               cs.total_for_coin,
               cs.share_pct,
-              COUNT(st.transaction_id) as sales_count,
+              COUNT(CASE WHEN COALESCE(st.is_refund, false) = false THEN st.transaction_id END) as sales_count,
+              COUNT(CASE WHEN st.is_refund = true THEN st.transaction_id END) as refund_count,
               COALESCE(SUM(st.quantity_sold), 0) as total_sold,
-              COALESCE(SUM(st.payout * cs.share_pct), 0) as user_payout
+              COALESCE(SUM(st.payout * cs.share_pct), 0) as user_payout,
+              COALESCE(SUM(CASE WHEN st.is_refund = true THEN st.payout * cs.share_pct ELSE 0 END), 0) as refund_amount
             FROM contribution_shares cs
             LEFT JOIN sales_transactions st ON cs.coin_type_id = st.coin_type_id
             GROUP BY cs.batch_id, cs.coin_type_id, cs.user_contributed, cs.total_for_coin, cs.share_pct
@@ -120,6 +129,8 @@ export default async function handler(req, res) {
             cs.total_for_coin,
             cs.total_sold,
             cs.user_payout,
+            cs.refund_count,
+            cs.refund_amount,
             ROUND(cs.share_pct * 100, 1) as share_pct
           FROM coin_sales cs
           JOIN batches b ON cs.batch_id = b.batch_id

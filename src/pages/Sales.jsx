@@ -129,25 +129,34 @@ export default function Sales() {
 
       {/* Summary Cards */}
       {summary && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <div className="card p-4">
-            <p className="text-sm text-slate-500">Total Revenue</p>
+            <p className="text-sm text-slate-500">Gross Revenue</p>
             <p className="text-2xl font-bold text-slate-900">${parseFloat(summary.total_revenue || 0).toLocaleString()}</p>
+            {parseFloat(summary.total_shipping) > 0 && (
+              <p className="text-xs text-amber-600 mt-1">-${parseFloat(summary.total_shipping).toFixed(2)} shipping</p>
+            )}
           </div>
           <div className="card p-4">
-            <p className="text-sm text-slate-500">Total Profit</p>
+            <p className="text-sm text-slate-500">Net Profit</p>
             <p className={`text-2xl font-bold ${parseFloat(summary.total_profit) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
               {formatCurrency(summary.total_profit)}
             </p>
           </div>
           <div className="card p-4">
-            <p className="text-sm text-slate-500">Profit Share (Admin)</p>
+            <p className="text-sm text-slate-500">Your Share (33%)</p>
             <p className="text-2xl font-bold text-knox-600">${parseFloat(summary.total_profit_share || 0).toLocaleString()}</p>
           </div>
           <div className="card p-4">
             <p className="text-sm text-slate-500">Member Payouts</p>
             <p className="text-2xl font-bold text-slate-900">${parseFloat(summary.total_payout || 0).toLocaleString()}</p>
           </div>
+          {parseInt(summary.refund_count) > 0 && (
+            <div className="card p-4 bg-red-50">
+              <p className="text-sm text-red-600">Refunds ({summary.refund_count})</p>
+              <p className="text-2xl font-bold text-red-700">{formatCurrency(summary.refund_total)}</p>
+            </div>
+          )}
         </div>
       )}
 
@@ -228,16 +237,22 @@ export default function Sales() {
               ) : (
                 transactions.map((tx) => {
                   const profit = parseFloat(tx.profit) || 0
+                  const isRefund = tx.is_refund
+                  const isRefunded = tx.is_refunded
                   return (
-                    <tr key={tx.transaction_id} className="hover:bg-slate-50">
-                      <td className="table-cell font-mono text-xs">{tx.order_number || tx.listing_id || '-'}</td>
+                    <tr key={tx.transaction_id} className={`hover:bg-slate-50 ${isRefund ? 'bg-red-50' : isRefunded ? 'bg-orange-50' : ''}`}>
+                      <td className="table-cell font-mono text-xs">
+                        {tx.order_number || tx.listing_id || '-'}
+                        {isRefund && <span className="ml-1 px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-[10px] font-medium">REFUND</span>}
+                        {isRefunded && <span className="ml-1 px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded text-[10px] font-medium">REFUNDED</span>}
+                      </td>
                       <td className="table-cell whitespace-nowrap">
                         {tx.sale_date?.split('T')[0]}
                       </td>
                       <td className="table-cell text-right">{formatCurrency(tx.sale_price)}</td>
                       <td className="table-cell text-right text-red-600">{formatCurrency(-Math.abs(tx.ebay_fee))}</td>
                       <td className="table-cell text-right text-red-600">{tx.advertising_fee > 0 ? formatCurrency(-tx.advertising_fee) : '-'}</td>
-                      <td className="table-cell text-right">{formatCurrency(tx.shipping_cost)}</td>
+                      <td className="table-cell text-right text-amber-600">{tx.shipping_cost > 0 ? formatCurrency(-tx.shipping_cost) : '-'}</td>
                       <td className="table-cell text-right font-medium">{formatCurrency(tx.total_payout)}</td>
                       <td className="table-cell text-right">{formatCurrency(tx.coin_cost)}</td>
                       <td className={`table-cell text-right font-medium ${profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
