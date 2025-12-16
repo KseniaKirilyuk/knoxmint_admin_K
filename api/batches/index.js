@@ -368,7 +368,32 @@ export default async function handler(req, res) {
       if (user.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
 
       const { batchId } = req.query;
-      const { batchName, shipDate, grader, status, notes, coinPrices } = req.body;
+      const { batchName, shipDate, grader, status, notes, coinPrices, contributionId, quantity } = req.body;
+
+      // Update contribution (check this first since it doesn't need batchId in query)
+      if (contributionId !== undefined) {
+        if (quantity === 0) {
+          // Delete if quantity is 0
+          await query('DELETE FROM user_contributions WHERE id = $1', [contributionId]);
+        } else {
+          await query(
+            'UPDATE user_contributions SET quantity = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
+            [contributionId, quantity]
+          );
+        }
+
+        // Recalculate batch_coins totals
+        await query(`
+          UPDATE batch_coins bc
+          SET total_contributed = (
+            SELECT COALESCE(SUM(uc.quantity), 0) 
+            FROM user_contributions uc 
+            WHERE uc.batch_id = bc.batch_id AND uc.coin_type_id = bc.coin_type_id
+          )
+        `);
+
+        return res.json({ success: true });
+      }
 
       // Update batch
       if (batchId && !coinPrices) {
@@ -409,40 +434,7 @@ export default async function handler(req, res) {
         return res.json({ success: true });
       }
 
-      return res.status(400).json({ error: 'Batch ID required' });
-    }
-
-    // PUT requests - update contribution
-    if (req.method === 'PUT') {
-      if (user.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
-
-      const { contributionId, quantity } = req.body;
-
-      if (!contributionId) {
-        return res.status(400).json({ error: 'Contribution ID required' });
-      }
-
-      if (quantity === 0) {
-        // Delete if quantity is 0
-        await query('DELETE FROM user_contributions WHERE id = $1', [contributionId]);
-      } else {
-        await query(
-          'UPDATE user_contributions SET quantity = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
-          [contributionId, quantity]
-        );
-      }
-
-      // Recalculate batch_coins totals
-      await query(`
-        UPDATE batch_coins bc
-        SET total_contributed = (
-          SELECT COALESCE(SUM(uc.quantity), 0) 
-          FROM user_contributions uc 
-          WHERE uc.batch_id = bc.batch_id AND uc.coin_type_id = bc.coin_type_id
-        )
-      `);
-
-      return res.json({ success: true });
+      return res.status(400).json({ error: 'Batch ID or Contribution ID required' });
     }
 
     // DELETE requests
