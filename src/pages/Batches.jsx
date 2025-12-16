@@ -397,20 +397,6 @@ export default function Batches() {
     setShowEditModal(true)
   }
 
-  const openPricesModal = (batch) => {
-    setSelectedBatchId(batch.batch_id)
-    // Initialize prices from batch details
-    const prices = {}
-    batchDetails?.coins?.forEach(coin => {
-      prices[coin.coin_type_id] = {
-        original: coin.original_price || '',
-        current: coin.current_price || ''
-      }
-    })
-    setCoinPrices(prices)
-    setShowPricesModal(true)
-  }
-
   // Group contributions by coin type
   const groupContributions = (contributions) => {
     return contributions?.reduce((acc, contrib) => {
@@ -507,9 +493,6 @@ export default function Batches() {
                     <button onClick={() => openUploadModal(batch.batch_id)} className="btn btn-secondary btn-sm gap-1">
                       <UploadIcon className="w-4 h-4" /> Upload Contributions
                     </button>
-                    <button onClick={() => openPricesModal(batch)} className="btn btn-secondary btn-sm gap-1">
-                      <DollarSign className="w-4 h-4" /> Edit Prices
-                    </button>
                     <button onClick={() => openEditModal(batch)} className="btn btn-secondary btn-sm gap-1">
                       <Edit2 className="w-4 h-4" /> Edit Batch
                     </button>
@@ -529,16 +512,18 @@ export default function Batches() {
                             const prices = {}
                             batchDetails.coins.forEach(c => {
                               const key = String(c.coin_type_id)
-                              const numVal = parseFloat(c.cost_per_coin)
-                              // Only show as value if it's a valid positive number (0 = not set)
-                              if (numVal && numVal > 0 && !isNaN(numVal)) {
-                                prices[key] = numVal
+                              // Get raw value and ensure it's a number
+                              const rawVal = c.cost_per_coin
+                              const numVal = typeof rawVal === 'number' ? rawVal : parseFloat(rawVal)
+                              // Only show as value if it's a valid positive number
+                              if (!isNaN(numVal) && numVal > 0) {
+                                prices[key] = String(numVal) // Store as string for text input
                               } else {
                                 prices[key] = ''
                               }
                             })
                             setCoinPrices(prices)
-                            setOriginalPrices({...prices}) // Save original to detect changes
+                            setOriginalPrices({...prices})
                             setSelectedBatchId(expandedBatch)
                             setShowPricesModal(true)
                           }}
@@ -771,7 +756,7 @@ export default function Batches() {
                           pattern="[0-9]*\.?[0-9]*"
                           className="input pl-7 text-right"
                           placeholder="—"
-                          value={coinPrices[key] || ''}
+                          value={typeof coinPrices[key] === 'object' ? '' : (coinPrices[key] || '')}
                           onChange={(e) => {
                             // Only allow numbers and decimal
                             const val = e.target.value.replace(/[^0-9.]/g, '')
