@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Search, Download, ChevronLeft, ChevronRight, Trash2, TrendingUp, TrendingDown } from 'lucide-react'
+import { Search, Download, ChevronLeft, ChevronRight, Trash2, TrendingUp, TrendingDown, AlertTriangle } from 'lucide-react'
 import api from '../lib/api'
 
 export default function Sales() {
@@ -7,6 +7,7 @@ export default function Sales() {
   const [coinTypes, setCoinTypes] = useState([])
   const [loading, setLoading] = useState(true)
   const [summary, setSummary] = useState(null)
+  const [unmappedCount, setUnmappedCount] = useState(0)
   const [filters, setFilters] = useState({
     coinTypeId: '',
     startDate: '',
@@ -49,6 +50,7 @@ export default function Sales() {
       const response = await api.get(`/transactions?${params}`)
       setTransactions(response.data.transactions)
       setSummary(response.data.summary)
+      setUnmappedCount(response.data.unmappedCount || 0)
       setPagination(prev => ({ ...prev, total: response.data.total }))
     } catch (error) {
       console.error('Error fetching transactions:', error)
@@ -133,8 +135,14 @@ export default function Sales() {
           {filters.coinTypeId && (
             <div className="flex items-center gap-2">
               <span className="text-sm text-slate-500">Showing totals for:</span>
-              <span className="px-3 py-1 bg-knox-100 text-knox-700 rounded-full text-sm font-medium">
-                {coinTypes.find(ct => ct.coin_type_id === parseInt(filters.coinTypeId))?.name || 'Selected Coin'}
+              <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                filters.coinTypeId === 'unmapped' 
+                  ? 'bg-amber-100 text-amber-700' 
+                  : 'bg-knox-100 text-knox-700'
+              }`}>
+                {filters.coinTypeId === 'unmapped' 
+                  ? '⚠️ Unmapped Sales' 
+                  : coinTypes.find(ct => ct.coin_type_id === parseInt(filters.coinTypeId))?.name || 'Selected Coin'}
               </span>
             </div>
           )}
@@ -174,6 +182,25 @@ export default function Sales() {
         </div>
       )}
 
+      {/* Unmapped Warning */}
+      {unmappedCount > 0 && filters.coinTypeId !== 'unmapped' && (
+        <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="text-amber-800 font-medium">
+              {unmappedCount} sale{unmappedCount > 1 ? 's' : ''} not mapped to any coin type
+            </p>
+            <p className="text-amber-600 text-sm">These won't be included in member payout calculations.</p>
+          </div>
+          <button 
+            onClick={() => handleFilterChange('coinTypeId', 'unmapped')}
+            className="btn btn-secondary text-amber-700 border-amber-300 hover:bg-amber-100"
+          >
+            View Unmapped
+          </button>
+        </div>
+      )}
+
       {/* Filters */}
       <div className="card p-4">
         <div className="flex flex-wrap items-center gap-4">
@@ -183,6 +210,9 @@ export default function Sales() {
             onChange={(e) => handleFilterChange('coinTypeId', e.target.value)}
           >
             <option value="">All Coin Types</option>
+            <option value="unmapped" className="text-amber-600">
+              ⚠️ Unmapped Sales {unmappedCount > 0 ? `(${unmappedCount})` : ''}
+            </option>
             {coinTypes.map(ct => (
               <option key={ct.coin_type_id} value={ct.coin_type_id}>{ct.name}</option>
             ))}

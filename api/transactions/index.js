@@ -36,7 +36,9 @@ export default async function handler(req, res) {
         params.push(batchId);
         paramIndex++;
       }
-      if (coinTypeId) {
+      if (coinTypeId === 'unmapped') {
+        sql += ` AND st.coin_type_id IS NULL AND COALESCE(st.is_refund, false) = false`;
+      } else if (coinTypeId) {
         sql += ` AND st.coin_type_id = $${paramIndex}`;
         params.push(coinTypeId);
         paramIndex++;
@@ -67,7 +69,9 @@ export default async function handler(req, res) {
         countParams.push(batchId);
         countParamIndex++;
       }
-      if (coinTypeId) {
+      if (coinTypeId === 'unmapped') {
+        countSql += ` AND coin_type_id IS NULL AND COALESCE(is_refund, false) = false`;
+      } else if (coinTypeId) {
         countSql += ` AND coin_type_id = $${countParamIndex}`;
         countParams.push(coinTypeId);
         countParamIndex++;
@@ -84,6 +88,13 @@ export default async function handler(req, res) {
       }
       
       const countResult = await query(countSql, countParams);
+
+      // Get unmapped count (always, for the warning badge)
+      const unmappedResult = await query(`
+        SELECT COUNT(*) as unmapped_count 
+        FROM sales_transactions 
+        WHERE coin_type_id IS NULL AND COALESCE(is_refund, false) = false
+      `);
 
       // Get summary stats - apply same filters
       let summarySql = `
@@ -109,7 +120,9 @@ export default async function handler(req, res) {
         summaryParams.push(batchId);
         summaryParamIndex++;
       }
-      if (coinTypeId) {
+      if (coinTypeId === 'unmapped') {
+        summarySql += ` AND coin_type_id IS NULL AND COALESCE(is_refund, false) = false`;
+      } else if (coinTypeId) {
         summarySql += ` AND coin_type_id = $${summaryParamIndex}`;
         summaryParams.push(coinTypeId);
         summaryParamIndex++;
@@ -133,6 +146,7 @@ export default async function handler(req, res) {
         limit: parseInt(limit),
         offset: parseInt(offset),
         summary: summaryResult.rows[0],
+        unmappedCount: parseInt(unmappedResult.rows[0].unmapped_count),
         filtered: !!(coinTypeId || startDate || endDate || batchId)
       });
     }
