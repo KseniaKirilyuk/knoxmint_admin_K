@@ -29,6 +29,7 @@ export default function Batches() {
   const [dragActive, setDragActive] = useState(false)
   const [error, setError] = useState('')
   const [coinPrices, setCoinPrices] = useState({})
+  const [originalPrices, setOriginalPrices] = useState({}) // Track original prices to detect changes
   const [coinMappings, setCoinMappings] = useState({}) // Maps unmatched coin names to selected coin_type_id
 
   // Fuzzy match helper - find best matching coin type
@@ -145,10 +146,24 @@ export default function Batches() {
     }
   }
 
-  // Update prices
+  // Update prices - only send changed ones
   const handleSavePrices = async () => {
     try {
-      await api.put(`/batches?batchId=${selectedBatchId}`, { coinPrices })
+      // Only include prices that actually changed
+      const changedPrices = {}
+      for (const [key, value] of Object.entries(coinPrices)) {
+        const originalValue = originalPrices[key]
+        // Compare as strings to handle '' vs undefined vs number
+        if (String(value) !== String(originalValue)) {
+          changedPrices[key] = value
+        }
+      }
+      
+      // Only make API call if something changed
+      if (Object.keys(changedPrices).length > 0) {
+        await api.put(`/batches?batchId=${selectedBatchId}`, { coinPrices: changedPrices })
+      }
+      
       setShowPricesModal(false)
       fetchBatchDetails(selectedBatchId)
     } catch (err) {
@@ -520,6 +535,7 @@ export default function Batches() {
                               }
                             })
                             setCoinPrices(prices)
+                            setOriginalPrices({...prices}) // Save original to detect changes
                             setSelectedBatchId(expandedBatch)
                             setShowPricesModal(true)
                           }}
