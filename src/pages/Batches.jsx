@@ -146,22 +146,25 @@ export default function Batches() {
     }
   }
 
-  // Update prices - only send changed ones
+  // Update prices - only send coins with actual values entered
   const handleSavePrices = async () => {
     try {
-      // Only include prices that actually changed
-      const changedPrices = {}
+      // Only include coins that have a positive value entered
+      const pricesToSave = {}
       for (const [key, value] of Object.entries(coinPrices)) {
-        const originalValue = originalPrices[key]
-        // Compare as strings to handle '' vs undefined vs number
-        if (String(value) !== String(originalValue)) {
-          changedPrices[key] = value
+        // Skip empty values - don't update coins without a value
+        if (value === '' || value === null || value === undefined) continue
+        
+        const num = parseFloat(value)
+        // Only save positive numbers
+        if (!isNaN(num) && num > 0) {
+          pricesToSave[key] = num
         }
       }
       
-      // Only make API call if something changed
-      if (Object.keys(changedPrices).length > 0) {
-        await api.put(`/batches?batchId=${selectedBatchId}`, { coinPrices: changedPrices })
+      // Only make API call if there are prices to save
+      if (Object.keys(pricesToSave).length > 0) {
+        await api.put(`/batches?batchId=${selectedBatchId}`, { coinPrices: pricesToSave })
       }
       
       setShowPricesModal(false)
@@ -526,9 +529,9 @@ export default function Batches() {
                             const prices = {}
                             batchDetails.coins.forEach(c => {
                               const key = String(c.coin_type_id)
-                              // Check if we have a valid number
                               const numVal = parseFloat(c.cost_per_coin)
-                              if (c.cost_per_coin !== null && c.cost_per_coin !== undefined && !isNaN(numVal)) {
+                              // Only show as value if it's a valid positive number (0 = not set)
+                              if (numVal && numVal > 0 && !isNaN(numVal)) {
                                 prices[key] = numVal
                               } else {
                                 prices[key] = ''
@@ -763,15 +766,20 @@ export default function Batches() {
                       <div className="relative">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
                         <input
-                          type="number"
-                          step="0.01"
+                          type="text"
+                          inputMode="decimal"
+                          pattern="[0-9]*\.?[0-9]*"
                           className="input pl-7 text-right"
-                          placeholder="0.00"
-                          value={coinPrices[key] ?? ''}
-                          onChange={(e) => setCoinPrices({
-                            ...coinPrices,
-                            [key]: e.target.value
-                          })}
+                          placeholder="—"
+                          value={coinPrices[key] || ''}
+                          onChange={(e) => {
+                            // Only allow numbers and decimal
+                            const val = e.target.value.replace(/[^0-9.]/g, '')
+                            setCoinPrices({
+                              ...coinPrices,
+                              [key]: val
+                            })
+                          }}
                         />
                       </div>
                     </div>

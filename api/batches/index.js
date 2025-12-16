@@ -13,8 +13,10 @@ function verifyToken(req) {
 async function ensureCostColumn() {
   try {
     await query(`ALTER TABLE batch_coins ADD COLUMN IF NOT EXISTS cost_per_coin DECIMAL(10, 2)`);
-    // Migrate old prices if they exist
-    await query(`UPDATE batch_coins SET cost_per_coin = original_price WHERE cost_per_coin IS NULL AND original_price IS NOT NULL`);
+    // Migrate old prices if they exist (and are positive)
+    await query(`UPDATE batch_coins SET cost_per_coin = original_price WHERE cost_per_coin IS NULL AND original_price IS NOT NULL AND original_price > 0`);
+    // Fix any 0 values to null (0 = not set)
+    await query(`UPDATE batch_coins SET cost_per_coin = NULL WHERE cost_per_coin = 0`);
   } catch (e) {
     // Ignore - column may already exist or original_price may not exist
   }
@@ -330,11 +332,12 @@ export default async function handler(req, res) {
         await ensureCostColumn();
         
         for (const [coinTypeId, price] of Object.entries(coinPrices)) {
-          // Only save if we have a valid price or explicitly null/empty
+          // Only save if we have a valid positive price, otherwise null
           let priceValue = null;
           if (price !== '' && price !== null && price !== undefined) {
             const parsed = parseFloat(price);
-            if (!isNaN(parsed)) {
+            // Only save positive values (0 = not set)
+            if (!isNaN(parsed) && parsed > 0) {
               priceValue = parsed;
             }
           }
