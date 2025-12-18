@@ -654,22 +654,36 @@ export default function Batches() {
                           Edit
                         </button>
                       </div>
-                      {Object.entries(groupContributions(batchDetails.contributions)).map(([coinType, data]) => (
-                        <div key={coinType} className="mb-4 last:mb-0">
-                          <p className="text-sm font-medium text-slate-700 mb-2">{coinType} ({data.total} total)</p>
-                          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
-                            {data.members.map(contrib => (
-                              <div key={contrib.id} className="px-3 py-2 bg-slate-50 rounded text-sm">
-                                <span className="font-medium">{contrib.full_name || contrib.username}</span>
-                                <span className="text-slate-500 ml-2">{contrib.quantity}</span>
-                                <span className="text-slate-400 ml-1">
-                                  ({((contrib.quantity / data.total) * 100).toFixed(1)}%)
-                                </span>
-                              </div>
+                      <div className="border rounded-lg overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-slate-50 border-b">
+                              <th className="text-left px-4 py-2 font-medium text-slate-600">Coin Type</th>
+                              <th className="text-left px-4 py-2 font-medium text-slate-600">Member</th>
+                              <th className="text-right px-4 py-2 font-medium text-slate-600">Qty</th>
+                              <th className="text-right px-4 py-2 font-medium text-slate-600">Share</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Object.entries(groupContributions(batchDetails.contributions)).map(([coinType, data]) => (
+                              data.members.map((contrib, idx) => (
+                                <tr key={contrib.id} className="border-b last:border-b-0 hover:bg-slate-50">
+                                  <td className="px-4 py-2 font-medium text-slate-900">
+                                    {idx === 0 ? (
+                                      <span>{coinType} <span className="text-slate-400 font-normal">({data.total})</span></span>
+                                    ) : null}
+                                  </td>
+                                  <td className="px-4 py-2 text-slate-700">{contrib.full_name || contrib.username}</td>
+                                  <td className="px-4 py-2 text-right text-slate-900">{contrib.quantity}</td>
+                                  <td className="px-4 py-2 text-right text-slate-500">
+                                    {((contrib.quantity / data.total) * 100).toFixed(1)}%
+                                  </td>
+                                </tr>
+                              ))
                             ))}
-                          </div>
-                        </div>
-                      ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   ) : (
                     <div className="px-6 py-8 text-center text-slate-500">
