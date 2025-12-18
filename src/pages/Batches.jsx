@@ -654,35 +654,34 @@ export default function Batches() {
                           Edit
                         </button>
                       </div>
-                      <div className="border rounded-lg overflow-hidden">
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="bg-slate-50 border-b">
-                              <th className="text-left px-4 py-2 font-medium text-slate-600">Coin Type</th>
-                              <th className="text-left px-4 py-2 font-medium text-slate-600">Member</th>
-                              <th className="text-right px-4 py-2 font-medium text-slate-600">Qty</th>
-                              <th className="text-right px-4 py-2 font-medium text-slate-600">Share</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {Object.entries(groupContributions(batchDetails.contributions)).map(([coinType, data]) => (
-                              data.members.map((contrib, idx) => (
-                                <tr key={contrib.id} className="border-b last:border-b-0 hover:bg-slate-50">
-                                  <td className="px-4 py-2 font-medium text-slate-900">
-                                    {idx === 0 ? (
-                                      <span>{coinType} <span className="text-slate-400 font-normal">({data.total})</span></span>
-                                    ) : null}
-                                  </td>
-                                  <td className="px-4 py-2 text-slate-700">{contrib.full_name || contrib.username}</td>
-                                  <td className="px-4 py-2 text-right text-slate-900">{contrib.quantity}</td>
-                                  <td className="px-4 py-2 text-right text-slate-500">
-                                    {((contrib.quantity / data.total) * 100).toFixed(1)}%
-                                  </td>
-                                </tr>
-                              ))
-                            ))}
-                          </tbody>
-                        </table>
+                      <div className="space-y-3">
+                        {Object.entries(groupContributions(batchDetails.contributions)).map(([coinType, data]) => (
+                          <div key={coinType} className="border rounded-lg overflow-hidden">
+                            <div className="bg-slate-100 px-4 py-2 flex items-center justify-between">
+                              <span className="font-medium text-slate-800">{coinType}</span>
+                              <span className="text-sm text-slate-500">{data.total} coins</span>
+                            </div>
+                            <div className="divide-y">
+                              {data.members.map(contrib => (
+                                <div key={contrib.id} className="px-4 py-2 flex items-center justify-between hover:bg-slate-50">
+                                  <span className="text-slate-700">{contrib.full_name || contrib.username}</span>
+                                  <div className="flex items-center gap-4">
+                                    <span className="font-medium text-slate-900 w-12 text-right">{contrib.quantity}</span>
+                                    <span className="text-slate-400 w-16 text-right text-sm">
+                                      {((contrib.quantity / data.total) * 100).toFixed(1)}%
+                                    </span>
+                                    <div className="w-24 bg-slate-200 rounded-full h-2">
+                                      <div 
+                                        className="bg-knox-500 h-2 rounded-full" 
+                                        style={{ width: `${(contrib.quantity / data.total) * 100}%` }}
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   ) : (
