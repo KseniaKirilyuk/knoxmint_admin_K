@@ -15,7 +15,26 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === 'GET') {
-      const { batchId, coinTypeId, startDate, endDate, limit = 50, offset = 0 } = req.query;
+      const { action, batchId, coinTypeId, startDate, endDate, limit = 50, offset = 0 } = req.query;
+
+      // Get unique unmapped titles for bulk mapping - check this FIRST
+      if (action === 'unmappedTitles') {
+        const result = await query(`
+          SELECT 
+            item_title,
+            COUNT(*) as count,
+            SUM(sale_price) as total_revenue,
+            MIN(sale_date) as first_sale,
+            MAX(sale_date) as last_sale
+          FROM sales_transactions
+          WHERE coin_type_id IS NULL 
+            AND COALESCE(is_refund, false) = false
+            AND item_title IS NOT NULL
+          GROUP BY item_title
+          ORDER BY count DESC
+        `);
+        return res.json(result.rows);
+      }
       
       let sql = `
         SELECT 
@@ -149,25 +168,6 @@ export default async function handler(req, res) {
         unmappedCount: parseInt(unmappedResult.rows[0].unmapped_count),
         filtered: !!(coinTypeId || startDate || endDate || batchId)
       });
-    }
-
-    // Get unique unmapped titles for bulk mapping
-    if (req.method === 'GET' && req.query.action === 'unmappedTitles') {
-      const result = await query(`
-        SELECT 
-          item_title,
-          COUNT(*) as count,
-          SUM(sale_price) as total_revenue,
-          MIN(sale_date) as first_sale,
-          MAX(sale_date) as last_sale
-        FROM sales_transactions
-        WHERE coin_type_id IS NULL 
-          AND COALESCE(is_refund, false) = false
-          AND item_title IS NOT NULL
-        GROUP BY item_title
-        ORDER BY count DESC
-      `);
-      return res.json(result.rows);
     }
 
     // Apply bulk mappings
