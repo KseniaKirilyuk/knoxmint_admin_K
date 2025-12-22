@@ -165,6 +165,175 @@ export default async function handler(req, res) {
         return res.json({ success: true });
       }
 
+      // Bulk import multiple batches
+      if (action === 'bulkImport') {
+        const { batches, coinCodeMappings, newCoinTypes } = req.body;
+        
+        if (!batches || !Array.isArray(batches)) {
+          return res.status(400).json({ error: 'Batches array required' });
+        }
+
+        let batchesCreated = 0;
+        let contributionsCreated = 0;
+        let coinTypesCreated = 0;
+        const errors = [];
+        const coinTypeCache = {}; // Cache for newly created coin types
+
+        // First, create any new coin types
+        for (const [code, mapping] of Object.entries(coinCodeMappings || {})) {
+          if (mapping === 'new' && newCoinTypes?.[code]) {
+            try {
+              const { name, shortCode } = newCoinTypes[code];
+              const existing = await query(
+                'SELECT coin_type_id FROM coin_types WHERE LOWER(name) = LOWER($1) OR LOWER(short_code) = LOWER($2)',
+                [name, shortCode || name]
+              );
+              
+              if (existing.rows.length > 0) {
+                coinTypeCache[code] = existing.rows[0].coin_type_id;
+              } else {
+                const result = await query(
+                  'INSERT INTO coin_types (name, short_code) VALUES ($1, $2) RETURNING coin_type_id',
+                  [name, shortCode || null]
+                );
+                coinTypeCache[code] = result.rows[0].coin_type_id;
+                coinTypesCreated++;
+              }
+            } catch (err) {
+              errors.push(`Failed to create coin type for ${code}: ${err.message}`);
+            }
+          }
+        }
+
+        // Now process each batch
+        for (const batchData of batches) {
+          try {
+            const { batchName, contributions } = batchData;
+            
+            // Check if batch already exists
+            const existingBatch = await query(
+              'SELECT batch_id FROM batches WHERE LOWER(batch_name) = LOWER($1)',
+              [batchName]
+            );
+            
+            let batchId;
+            if (existingBatch.rows.length > 0) {
+              batchId = existingBatch.rows[0].batch_id;
+            } else {
+              const batchResult = await query(
+                'INSERT INTO batches (batch_name) VALUES ($1) RETURNING batch_id',
+                [batchName]
+              );
+              batchId = batchResult.rows[0].batch_id;
+              batchesCreated++;
+            }
+
+            // Process contributions
+            const coinTypeTotals = {};
+            
+            for (const contrib of contributions) {
+              try {
+                const { memberName, coinCode, coinTypeId, quantity } = contrib;
+                if (!memberName || !quantity || quantity <= 0) continue;
+
+                // Resolve coin type ID
+                let resolvedCoinTypeId = coinTypeId;
+                if (!resolvedCoinTypeId) {
+                  // Check cache for newly created coin types
+                  if (coinTypeCache[coinCode]) {
+                    resolvedCoinTypeId = coinTypeCache[coinCode];
+                  } else if (coinCodeMappings[coinCode] && coinCodeMappings[coinCode] !== 'new') {
+                    resolvedCoinTypeId = parseInt(coinCodeMappings[coinCode]);
+                  }
+                }
+
+                if (!resolvedCoinTypeId) {
+                  errors.push(`No coin type mapping for ${coinCode}`);
+                  continue;
+                }
+
+                // Find or create user
+                let userResult = await query(
+                  'SELECT user_id FROM users WHERE LOWER(username) = LOWER($1) OR LOWER(full_name) = LOWER($1)',
+                  [memberName]
+                );
+                
+                let userId;
+                if (userResult.rows.length === 0) {
+                  const newUser = await query(
+                    'INSERT INTO users (username, full_name, role) VALUES ($1, $2, $3) RETURNING user_id',
+                    [memberName.toLowerCase().replace(/\s+/g, '_'), memberName, 'user']
+                  );
+                  userId = newUser.rows[0].user_id;
+                } else {
+                  userId = userResult.rows[0].user_id;
+                }
+
+                // Check for existing contribution
+                const existingContrib = await query(
+                  'SELECT id FROM user_contributions WHERE batch_id = $1 AND user_id = $2 AND coin_type_id = $3',
+                  [batchId, userId, resolvedCoinTypeId]
+                );
+
+                if (existingContrib.rows.length > 0) {
+                  await query(
+                    'UPDATE user_contributions SET quantity = quantity + $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+                    [quantity, existingContrib.rows[0].id]
+                  );
+                } else {
+                  await query(
+                    'INSERT INTO user_contributions (user_id, batch_id, coin_type_id, quantity) VALUES ($1, $2, $3, $4)',
+                    [userId, batchId, resolvedCoinTypeId, quantity]
+                  );
+                }
+                
+                contributionsCreated++;
+                
+                // Track totals for batch_coins
+                if (!coinTypeTotals[resolvedCoinTypeId]) coinTypeTotals[resolvedCoinTypeId] = 0;
+                coinTypeTotals[resolvedCoinTypeId] += quantity;
+              } catch (err) {
+                errors.push(`Error processing ${contrib.memberName}/${contrib.coinCode}: ${err.message}`);
+              }
+            }
+
+            // Update batch_coins
+            for (const [ctId, total] of Object.entries(coinTypeTotals)) {
+              const bcExists = await query(
+                'SELECT 1 FROM batch_coins WHERE batch_id = $1 AND coin_type_id = $2',
+                [batchId, ctId]
+              );
+              
+              if (bcExists.rows.length === 0) {
+                await query(
+                  'INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed) VALUES ($1, $2, $3)',
+                  [batchId, ctId, total]
+                );
+              } else {
+                await query(`
+                  UPDATE batch_coins 
+                  SET total_contributed = (
+                    SELECT COALESCE(SUM(quantity), 0) FROM user_contributions 
+                    WHERE batch_id = $1 AND coin_type_id = $2
+                  )
+                  WHERE batch_id = $1 AND coin_type_id = $2
+                `, [batchId, ctId]);
+              }
+            }
+          } catch (err) {
+            errors.push(`Failed to create batch ${batchData.batchName}: ${err.message}`);
+          }
+        }
+
+        return res.json({
+          success: true,
+          batchesCreated,
+          contributionsCreated,
+          coinTypesCreated,
+          errors: errors.length > 0 ? errors : undefined
+        });
+      }
+
       // Upload contributions for a batch
       if (action === 'uploadContributions') {
         const { batchId, contributions, coinPrices, coinMappings } = req.body;

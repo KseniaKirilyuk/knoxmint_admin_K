@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, Upload as UploadIcon, Calendar, Package, Users, X, Edit2, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, CheckCircle, AlertCircle, DollarSign } from 'lucide-react'
+import { Plus, Upload as UploadIcon, Calendar, Package, Users, X, Edit2, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, CheckCircle, AlertCircle, DollarSign, Check } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import api from '../lib/api'
 
@@ -19,6 +19,17 @@ export default function Batches() {
   const [showEditContribModal, setShowEditContribModal] = useState(false)
   const [editContributions, setEditContributions] = useState([])
   const [newContrib, setNewContrib] = useState({ userId: '', coinTypeId: '', quantity: 1 })
+  
+  // Multi-batch import
+  const [showMultiImportModal, setShowMultiImportModal] = useState(false)
+  const [multiImportStep, setMultiImportStep] = useState(1) // 1=select sheets, 2=map coins, 3=importing, 4=done
+  const [importFile, setImportFile] = useState(null)
+  const [availableSheets, setAvailableSheets] = useState([])
+  const [selectedSheets, setSelectedSheets] = useState({})
+  const [sheetData, setSheetData] = useState({}) // { sheetName: { coinCodes: [], members: [], data: {} } }
+  const [coinCodeMappings, setCoinCodeMappings] = useState({}) // { code: coinTypeId or 'new' }
+  const [newCoinTypes, setNewCoinTypes] = useState({}) // { code: { name, shortCode } }
+  const [importResults, setImportResults] = useState(null)
   
   // Form data
   const [createForm, setCreateForm] = useState({ batchName: '', shipDate: '', grader: '', notes: '' })
@@ -258,6 +269,183 @@ export default function Batches() {
       fetchData()
     } catch (err) {
       alert('Error adding contribution: ' + (err.response?.data?.error || err.message))
+    }
+  }
+
+  // Multi-batch import functions
+  const handleMultiImportFile = async (file) => {
+    setImportFile(file)
+    setError('')
+    
+    try {
+      const data = await file.arrayBuffer()
+      const workbook = XLSX.read(data, { type: 'array' })
+      
+      // Filter out "Coin Counts" sheets and empty sheets
+      const sheets = workbook.SheetNames.filter(name => 
+        !name.toLowerCase().includes('coin count') &&
+        !name.toLowerCase().includes('coincount')
+      )
+      
+      setAvailableSheets(sheets)
+      
+      // Parse each sheet to extract data
+      const parsedData = {}
+      sheets.forEach(sheetName => {
+        const worksheet = workbook.Sheets[sheetName]
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 })
+        
+        if (jsonData.length < 2) return // Skip empty sheets
+        
+        const headers = jsonData[0] || []
+        const memberCol = headers.findIndex(h => 
+          h && (h.toString().toLowerCase().includes('slack') || 
+                h.toString().toLowerCase().includes('name') ||
+                h.toString().toLowerCase().includes('member'))
+        )
+        
+        if (memberCol === -1) return // Can't identify member column
+        
+        // Coin codes are all other columns after member column
+        const coinCodes = headers.slice(memberCol + 1).filter(h => h && h.toString().trim())
+        
+        // Parse member contributions
+        const contributions = {}
+        jsonData.slice(1).forEach(row => {
+          const memberName = row[memberCol]
+          if (!memberName) return
+          
+          coinCodes.forEach((code, idx) => {
+            const qty = parseFloat(row[memberCol + 1 + idx]) || 0
+            if (qty > 0) {
+              if (!contributions[code]) contributions[code] = []
+              contributions[code].push({ member: memberName.toString(), quantity: qty })
+            }
+          })
+        })
+        
+        parsedData[sheetName] = {
+          coinCodes,
+          contributions,
+          totalMembers: new Set(jsonData.slice(1).map(r => r[memberCol]).filter(Boolean)).size
+        }
+      })
+      
+      setSheetData(parsedData)
+      
+      // Pre-select sheets that have data
+      const preSelected = {}
+      sheets.forEach(s => {
+        if (parsedData[s]?.coinCodes?.length > 0) {
+          preSelected[s] = true
+        }
+      })
+      setSelectedSheets(preSelected)
+      
+      setMultiImportStep(1)
+      setShowMultiImportModal(true)
+    } catch (err) {
+      setError('Error reading file: ' + err.message)
+    }
+  }
+
+  const proceedToMapping = () => {
+    // Collect all unique coin codes from selected sheets
+    const allCodes = new Set()
+    Object.entries(selectedSheets).forEach(([sheetName, isSelected]) => {
+      if (isSelected && sheetData[sheetName]) {
+        sheetData[sheetName].coinCodes.forEach(code => allCodes.add(code))
+      }
+    })
+    
+    // Auto-suggest mappings
+    const mappings = {}
+    const newTypes = {}
+    allCodes.forEach(code => {
+      const match = findBestMatch(code)
+      if (match) {
+        mappings[code] = match.coin_type_id
+      } else {
+        mappings[code] = 'new'
+        newTypes[code] = { name: code, shortCode: code }
+      }
+    })
+    
+    setCoinCodeMappings(mappings)
+    setNewCoinTypes(newTypes)
+    setMultiImportStep(2)
+  }
+
+  const executeMultiImport = async () => {
+    setMultiImportStep(3)
+    setImportResults(null)
+    
+    try {
+      // Build import payload
+      const batchesToImport = []
+      
+      Object.entries(selectedSheets).forEach(([sheetName, isSelected]) => {
+        if (!isSelected || !sheetData[sheetName]) return
+        
+        const sheet = sheetData[sheetName]
+        const contributions = []
+        
+        Object.entries(sheet.contributions).forEach(([coinCode, members]) => {
+          const mapping = coinCodeMappings[coinCode]
+          if (!mapping) return
+          
+          members.forEach(({ member, quantity }) => {
+            contributions.push({
+              memberName: member,
+              coinCode,
+              coinTypeId: mapping === 'new' ? null : mapping,
+              newCoinType: mapping === 'new' ? newCoinTypes[coinCode] : null,
+              quantity
+            })
+          })
+        })
+        
+        batchesToImport.push({
+          batchName: sheetName,
+          contributions
+        })
+      })
+      
+      const response = await api.post('/batches?action=bulkImport', {
+        batches: batchesToImport,
+        coinCodeMappings,
+        newCoinTypes
+      })
+      
+      setImportResults(response.data)
+      setMultiImportStep(4)
+      fetchData()
+      fetchCoinTypes()
+    } catch (err) {
+      setError('Import failed: ' + (err.response?.data?.error || err.message))
+      setMultiImportStep(2)
+    }
+  }
+
+  const resetMultiImport = () => {
+    setShowMultiImportModal(false)
+    setMultiImportStep(1)
+    setImportFile(null)
+    setAvailableSheets([])
+    setSelectedSheets({})
+    setSheetData({})
+    setCoinCodeMappings({})
+    setNewCoinTypes({})
+    setImportResults(null)
+    setError('')
+  }
+
+  const fetchCoinTypes = async () => {
+    try {
+      const res = await api.get('/batches?action=coinTypes')
+      setCoinTypes(res.data)
+    } catch (error) {
+      console.error('Error fetching coin types:', error)
     }
   }
 
@@ -509,10 +697,22 @@ export default function Batches() {
           <h1 className="text-2xl font-bold text-slate-900">Batches</h1>
           <p className="text-slate-500 mt-1">Manage grader shipments and member contributions</p>
         </div>
-        <button onClick={() => setShowCreateModal(true)} className="btn btn-primary gap-2">
-          <Plus className="w-4 h-4" />
-          New Batch
-        </button>
+        <div className="flex items-center gap-3">
+          <label className="btn btn-secondary gap-2 cursor-pointer">
+            <UploadIcon className="w-4 h-4" />
+            Import Batches
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={(e) => e.target.files?.[0] && handleMultiImportFile(e.target.files[0])}
+            />
+          </label>
+          <button onClick={() => setShowCreateModal(true)} className="btn btn-primary gap-2">
+            <Plus className="w-4 h-4" />
+            New Batch
+          </button>
+        </div>
       </div>
 
       {/* Batches List */}
@@ -1220,6 +1420,249 @@ export default function Batches() {
               >
                 Save Changes
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Multi-Import Modal */}
+      {showMultiImportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl mx-4 max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="px-6 py-4 border-b flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold">Import Batches</h2>
+                <p className="text-sm text-slate-500">
+                  {multiImportStep === 1 && 'Select sheets to import as batches'}
+                  {multiImportStep === 2 && 'Map coin codes to coin types'}
+                  {multiImportStep === 3 && 'Importing...'}
+                  {multiImportStep === 4 && 'Import complete'}
+                </p>
+              </div>
+              <button onClick={resetMultiImport} className="p-2 hover:bg-slate-100 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Step indicators */}
+            <div className="px-6 py-3 bg-slate-50 border-b">
+              <div className="flex items-center gap-2">
+                {[1, 2, 3, 4].map(step => (
+                  <div key={step} className="flex items-center">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+                      multiImportStep >= step 
+                        ? 'bg-knox-600 text-white' 
+                        : 'bg-slate-200 text-slate-500'
+                    }`}>
+                      {multiImportStep > step ? <Check className="w-4 h-4" /> : step}
+                    </div>
+                    {step < 4 && <div className={`w-12 h-1 mx-1 ${multiImportStep > step ? 'bg-knox-600' : 'bg-slate-200'}`} />}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto p-6">
+              {error && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+                  {error}
+                </div>
+              )}
+
+              {/* Step 1: Select Sheets */}
+              {multiImportStep === 1 && (
+                <div className="space-y-4">
+                  <p className="text-slate-600">
+                    Found {availableSheets.length} sheet(s) in <span className="font-medium">{importFile?.name}</span>
+                  </p>
+                  <div className="space-y-2">
+                    {availableSheets.map(sheetName => {
+                      const data = sheetData[sheetName]
+                      const hasData = data?.coinCodes?.length > 0
+                      return (
+                        <label 
+                          key={sheetName}
+                          className={`flex items-center gap-3 p-4 border rounded-lg cursor-pointer transition-colors ${
+                            selectedSheets[sheetName] ? 'border-knox-500 bg-knox-50' : 'hover:bg-slate-50'
+                          } ${!hasData ? 'opacity-50' : ''}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={!!selectedSheets[sheetName]}
+                            disabled={!hasData}
+                            onChange={(e) => setSelectedSheets(prev => ({
+                              ...prev,
+                              [sheetName]: e.target.checked
+                            }))}
+                            className="rounded border-slate-300 text-knox-600 focus:ring-knox-500"
+                          />
+                          <div className="flex-1">
+                            <p className="font-medium text-slate-900">{sheetName}</p>
+                            {hasData ? (
+                              <p className="text-sm text-slate-500">
+                                {data.coinCodes.length} coin type(s): {data.coinCodes.slice(0, 5).join(', ')}
+                                {data.coinCodes.length > 5 && ` +${data.coinCodes.length - 5} more`}
+                                {' • '}{data.totalMembers} member(s)
+                              </p>
+                            ) : (
+                              <p className="text-sm text-slate-400">No contribution data found</p>
+                            )}
+                          </div>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Step 2: Map Coin Codes */}
+              {multiImportStep === 2 && (
+                <div className="space-y-4">
+                  <p className="text-slate-600">
+                    Map each coin code to an existing coin type or create a new one.
+                  </p>
+                  <div className="space-y-3">
+                    {Object.keys(coinCodeMappings).map(code => (
+                      <div key={code} className="p-4 border rounded-lg">
+                        <div className="flex items-start gap-4">
+                          <div className="flex-shrink-0 w-32">
+                            <p className="font-mono font-medium text-slate-900 bg-slate-100 px-2 py-1 rounded">
+                              {code}
+                            </p>
+                          </div>
+                          <div className="flex-1 space-y-2">
+                            <select
+                              className="input"
+                              value={coinCodeMappings[code]}
+                              onChange={(e) => {
+                                const val = e.target.value
+                                setCoinCodeMappings(prev => ({ ...prev, [code]: val }))
+                                if (val === 'new' && !newCoinTypes[code]) {
+                                  setNewCoinTypes(prev => ({ ...prev, [code]: { name: code, shortCode: code } }))
+                                }
+                              }}
+                            >
+                              <option value="new">➕ Create new coin type</option>
+                              {coinTypes.map(ct => (
+                                <option key={ct.coin_type_id} value={ct.coin_type_id}>
+                                  {ct.name} {ct.short_code ? `(${ct.short_code})` : ''}
+                                </option>
+                              ))}
+                            </select>
+                            
+                            {coinCodeMappings[code] === 'new' && (
+                              <div className="grid grid-cols-2 gap-2 mt-2">
+                                <input
+                                  type="text"
+                                  placeholder="Coin type name"
+                                  className="input text-sm"
+                                  value={newCoinTypes[code]?.name || ''}
+                                  onChange={(e) => setNewCoinTypes(prev => ({
+                                    ...prev,
+                                    [code]: { ...prev[code], name: e.target.value }
+                                  }))}
+                                />
+                                <input
+                                  type="text"
+                                  placeholder="Short code"
+                                  className="input text-sm"
+                                  value={newCoinTypes[code]?.shortCode || ''}
+                                  onChange={(e) => setNewCoinTypes(prev => ({
+                                    ...prev,
+                                    [code]: { ...prev[code], shortCode: e.target.value }
+                                  }))}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Step 3: Importing */}
+              {multiImportStep === 3 && (
+                <div className="flex flex-col items-center justify-center py-12">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-knox-600 mb-4"></div>
+                  <p className="text-slate-600">Importing batches and contributions...</p>
+                </div>
+              )}
+
+              {/* Step 4: Complete */}
+              {multiImportStep === 4 && importResults && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3 p-4 bg-emerald-50 border border-emerald-200 rounded-lg">
+                    <CheckCircle className="w-6 h-6 text-emerald-600" />
+                    <div>
+                      <p className="font-medium text-emerald-800">Import completed successfully!</p>
+                      <p className="text-sm text-emerald-600">
+                        {importResults.batchesCreated} batch(es) created • {importResults.contributionsCreated} contribution(s) added
+                        {importResults.coinTypesCreated > 0 && ` • ${importResults.coinTypesCreated} new coin type(s)`}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  {importResults.errors?.length > 0 && (
+                    <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                      <p className="font-medium text-amber-800 mb-2">Some issues occurred:</p>
+                      <ul className="text-sm text-amber-700 list-disc list-inside">
+                        {importResults.errors.map((err, idx) => (
+                          <li key={idx}>{err}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t bg-slate-50 flex justify-between">
+              <button
+                onClick={resetMultiImport}
+                className="btn btn-secondary"
+              >
+                {multiImportStep === 4 ? 'Close' : 'Cancel'}
+              </button>
+              <div className="flex gap-3">
+                {multiImportStep === 2 && (
+                  <button
+                    onClick={() => setMultiImportStep(1)}
+                    className="btn btn-secondary"
+                  >
+                    Back
+                  </button>
+                )}
+                {multiImportStep === 1 && (
+                  <button
+                    onClick={proceedToMapping}
+                    disabled={Object.values(selectedSheets).filter(Boolean).length === 0}
+                    className="btn btn-primary"
+                  >
+                    Continue
+                  </button>
+                )}
+                {multiImportStep === 2 && (
+                  <button
+                    onClick={executeMultiImport}
+                    className="btn btn-primary"
+                  >
+                    Import {Object.values(selectedSheets).filter(Boolean).length} Batch(es)
+                  </button>
+                )}
+                {multiImportStep === 4 && (
+                  <button
+                    onClick={resetMultiImport}
+                    className="btn btn-primary"
+                  >
+                    Done
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
