@@ -97,7 +97,7 @@ export default async function handler(req, res) {
     if (req.method === 'POST') {
       if (user.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
 
-      const { action } = req.body;
+      const action = req.query.action || req.body.action;
 
       // Create new batch
       if (action === 'create') {
