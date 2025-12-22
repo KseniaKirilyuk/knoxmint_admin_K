@@ -1553,27 +1553,37 @@ export default function Batches() {
                             </select>
                             
                             {coinCodeMappings[code] === 'new' && (
-                              <div className="grid grid-cols-2 gap-2 mt-2">
-                                <input
-                                  type="text"
-                                  placeholder="Coin type name"
-                                  className="input text-sm"
-                                  value={newCoinTypes[code]?.name || ''}
-                                  onChange={(e) => setNewCoinTypes(prev => ({
-                                    ...prev,
-                                    [code]: { ...prev[code], name: e.target.value }
-                                  }))}
-                                />
-                                <input
-                                  type="text"
-                                  placeholder="Short code"
-                                  className="input text-sm"
-                                  value={newCoinTypes[code]?.shortCode || ''}
-                                  onChange={(e) => setNewCoinTypes(prev => ({
-                                    ...prev,
-                                    [code]: { ...prev[code], shortCode: e.target.value }
-                                  }))}
-                                />
+                              <div className="grid grid-cols-2 gap-3 mt-3 p-3 bg-slate-50 rounded-lg">
+                                <div>
+                                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                                    Full Name
+                                  </label>
+                                  <input
+                                    type="text"
+                                    placeholder="e.g., 2023 Silver Eagle"
+                                    className="input text-sm"
+                                    value={newCoinTypes[code]?.name || ''}
+                                    onChange={(e) => setNewCoinTypes(prev => ({
+                                      ...prev,
+                                      [code]: { ...prev[code], name: e.target.value }
+                                    }))}
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                                    Short Code
+                                  </label>
+                                  <input
+                                    type="text"
+                                    placeholder="e.g., 23XE"
+                                    className="input text-sm"
+                                    value={newCoinTypes[code]?.shortCode || ''}
+                                    onChange={(e) => setNewCoinTypes(prev => ({
+                                      ...prev,
+                                      [code]: { ...prev[code], shortCode: e.target.value }
+                                    }))}
+                                  />
+                                </div>
                               </div>
                             )}
                           </div>
