@@ -170,10 +170,63 @@ export default async function handler(req, res) {
       });
     }
 
-    // Apply bulk mappings
+    // PUT - Edit transaction or bulk mappings
     if (req.method === 'PUT') {
       if (user.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
       
+      const { transactionId } = req.query;
+      
+      // Single transaction edit
+      if (transactionId) {
+        const { coinTypeId, saleDate, salePrice, ebayFee, advertisingFee, shippingCost, coinCost, grade, quantitySold } = req.body;
+        
+        // Calculate derived values
+        const totalPayout = (parseFloat(salePrice) || 0) - (parseFloat(ebayFee) || 0) - (parseFloat(advertisingFee) || 0) - (parseFloat(shippingCost) || 0);
+        const profit = totalPayout - (parseFloat(coinCost) || 0);
+        const profitShare = profit > 0 ? Math.max(0.33 * profit, 8) : 0;
+        const memberPayout = profit > 0 ? profit - profitShare : 0;
+        const profitMargin = parseFloat(salePrice) > 0 ? profit / parseFloat(salePrice) : 0;
+        
+        await query(`
+          UPDATE sales_transactions
+          SET 
+            coin_type_id = $1,
+            sale_date = $2,
+            sale_price = $3,
+            ebay_fee = $4,
+            advertising_fee = $5,
+            shipping_cost = $6,
+            coin_cost = $7,
+            grade = $8,
+            quantity_sold = $9,
+            total_payout = $10,
+            profit = $11,
+            profit_share = $12,
+            payout = $13,
+            profit_margin = $14
+          WHERE transaction_id = $15
+        `, [
+          coinTypeId || null,
+          saleDate,
+          salePrice,
+          ebayFee,
+          advertisingFee,
+          shippingCost,
+          coinCost,
+          grade || null,
+          quantitySold,
+          totalPayout,
+          profit,
+          profitShare,
+          memberPayout,
+          profitMargin,
+          transactionId
+        ]);
+        
+        return res.json({ success: true });
+      }
+      
+      // Bulk mappings
       const { mappings } = req.body; // { "item_title": coinTypeId, ... }
       
       if (!mappings || typeof mappings !== 'object') {

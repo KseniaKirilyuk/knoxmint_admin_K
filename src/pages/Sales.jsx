@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Search, Download, ChevronLeft, ChevronRight, Trash2, TrendingUp, TrendingDown, AlertTriangle, X, Wand2 } from 'lucide-react'
+import { Search, Download, ChevronLeft, ChevronRight, Trash2, TrendingUp, TrendingDown, AlertTriangle, X, Wand2, Edit2 } from 'lucide-react'
 import api from '../lib/api'
 
 export default function Sales() {
@@ -24,6 +24,11 @@ export default function Sales() {
   const [unmappedTitles, setUnmappedTitles] = useState([])
   const [titleMappings, setTitleMappings] = useState({})
   const [applyingMappings, setApplyingMappings] = useState(false)
+
+  // Edit state
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editingTx, setEditingTx] = useState(null)
+  const [editForm, setEditForm] = useState({})
 
   useEffect(() => {
     fetchCoinTypes()
@@ -163,6 +168,45 @@ export default function Sales() {
       alert('Error applying mappings')
     } finally {
       setApplyingMappings(false)
+    }
+  }
+
+  // Edit functions
+  const openEditModal = (tx) => {
+    setEditingTx(tx)
+    setEditForm({
+      coinTypeId: tx.coin_type_id || '',
+      saleDate: tx.sale_date ? tx.sale_date.split('T')[0] : '',
+      salePrice: tx.sale_price || 0,
+      ebayFee: tx.ebay_fee || 0,
+      advertisingFee: tx.advertising_fee || 0,
+      shippingCost: tx.shipping_cost || 0,
+      coinCost: tx.coin_cost || 0,
+      grade: tx.grade || '',
+      quantitySold: tx.quantity_sold || 1
+    })
+    setShowEditModal(true)
+  }
+
+  const handleSaveEdit = async () => {
+    try {
+      await api.put(`/transactions?transactionId=${editingTx.transaction_id}`, {
+        coinTypeId: editForm.coinTypeId || null,
+        saleDate: editForm.saleDate,
+        salePrice: parseFloat(editForm.salePrice) || 0,
+        ebayFee: parseFloat(editForm.ebayFee) || 0,
+        advertisingFee: parseFloat(editForm.advertisingFee) || 0,
+        shippingCost: parseFloat(editForm.shippingCost) || 0,
+        coinCost: parseFloat(editForm.coinCost) || 0,
+        grade: editForm.grade,
+        quantitySold: parseInt(editForm.quantitySold) || 1
+      })
+      setShowEditModal(false)
+      setEditingTx(null)
+      fetchTransactions()
+    } catch (error) {
+      console.error('Error saving transaction:', error)
+      alert('Error saving transaction: ' + (error.response?.data?.error || error.message))
     }
   }
 
@@ -389,12 +433,22 @@ export default function Sales() {
                       <td className="table-cell">{tx.grade || '-'}</td>
                       <td className="table-cell text-center">{tx.quantity_sold}</td>
                       <td className="table-cell">
-                        <button 
-                          onClick={() => handleDelete(tx.transaction_id)}
-                          className="p-1 text-slate-400 hover:text-red-600"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button 
+                            onClick={() => openEditModal(tx)}
+                            className="p-1 text-slate-400 hover:text-knox-600"
+                            title="Edit"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button 
+                            onClick={() => handleDelete(tx.transaction_id)}
+                            className="p-1 text-slate-400 hover:text-red-600"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   )
@@ -521,6 +575,168 @@ export default function Sales() {
                   )}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Transaction Modal */}
+      {showEditModal && editingTx && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <div>
+                <h2 className="text-lg font-semibold">Edit Transaction</h2>
+                <p className="text-sm text-slate-500 font-mono">{editingTx.listing_id}</p>
+              </div>
+              <button onClick={() => setShowEditModal(false)} className="p-2 hover:bg-slate-100 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="label">Coin Type</label>
+                <select
+                  className="input"
+                  value={editForm.coinTypeId}
+                  onChange={(e) => setEditForm({ ...editForm, coinTypeId: e.target.value })}
+                >
+                  <option value="">-- Not Mapped --</option>
+                  {coinTypes.map(ct => (
+                    <option key={ct.coin_type_id} value={ct.coin_type_id}>
+                      {ct.name} {ct.short_code ? `(${ct.short_code})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Sale Date</label>
+                  <input
+                    type="date"
+                    className="input"
+                    value={editForm.saleDate}
+                    onChange={(e) => setEditForm({ ...editForm, saleDate: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="label">Grade</label>
+                  <input
+                    type="text"
+                    className="input"
+                    value={editForm.grade}
+                    onChange={(e) => setEditForm({ ...editForm, grade: e.target.value })}
+                    placeholder="e.g., MS70"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Sale Price ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="input"
+                    value={editForm.salePrice}
+                    onChange={(e) => setEditForm({ ...editForm, salePrice: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="label">Coin Cost ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="input"
+                    value={editForm.coinCost}
+                    onChange={(e) => setEditForm({ ...editForm, coinCost: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="label">eBay Fee ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="input"
+                    value={editForm.ebayFee}
+                    onChange={(e) => setEditForm({ ...editForm, ebayFee: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="label">Ads Fee ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="input"
+                    value={editForm.advertisingFee}
+                    onChange={(e) => setEditForm({ ...editForm, advertisingFee: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="label">Shipping ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="input"
+                    value={editForm.shippingCost}
+                    onChange={(e) => setEditForm({ ...editForm, shippingCost: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="label">Quantity Sold</label>
+                <input
+                  type="number"
+                  min="1"
+                  className="input w-24"
+                  value={editForm.quantitySold}
+                  onChange={(e) => setEditForm({ ...editForm, quantitySold: e.target.value })}
+                />
+              </div>
+
+              {/* Preview calculated values */}
+              <div className="bg-slate-50 rounded-lg p-4 space-y-2">
+                <h4 className="font-medium text-slate-700 text-sm">Calculated Values</h4>
+                <div className="grid grid-cols-3 gap-4 text-sm">
+                  <div>
+                    <p className="text-slate-500">Payout</p>
+                    <p className="font-medium">
+                      ${(parseFloat(editForm.salePrice || 0) - parseFloat(editForm.ebayFee || 0) - parseFloat(editForm.advertisingFee || 0) - parseFloat(editForm.shippingCost || 0)).toFixed(2)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-slate-500">Profit</p>
+                    <p className={`font-medium ${
+                      (parseFloat(editForm.salePrice || 0) - parseFloat(editForm.ebayFee || 0) - parseFloat(editForm.advertisingFee || 0) - parseFloat(editForm.shippingCost || 0) - parseFloat(editForm.coinCost || 0)) >= 0 
+                        ? 'text-emerald-600' : 'text-red-600'
+                    }`}>
+                      ${(parseFloat(editForm.salePrice || 0) - parseFloat(editForm.ebayFee || 0) - parseFloat(editForm.advertisingFee || 0) - parseFloat(editForm.shippingCost || 0) - parseFloat(editForm.coinCost || 0)).toFixed(2)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-slate-500">Margin</p>
+                    <p className="font-medium">
+                      {editForm.salePrice > 0 
+                        ? ((parseFloat(editForm.salePrice || 0) - parseFloat(editForm.ebayFee || 0) - parseFloat(editForm.advertisingFee || 0) - parseFloat(editForm.shippingCost || 0) - parseFloat(editForm.coinCost || 0)) / parseFloat(editForm.salePrice) * 100).toFixed(1) + '%'
+                        : '0%'
+                      }
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t bg-slate-50 flex gap-3">
+              <button onClick={() => setShowEditModal(false)} className="btn btn-secondary flex-1">
+                Cancel
+              </button>
+              <button onClick={handleSaveEdit} className="btn btn-primary flex-1">
+                Save Changes
+              </button>
             </div>
           </div>
         </div>
