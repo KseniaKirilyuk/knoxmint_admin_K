@@ -177,11 +177,11 @@ export default function Sales() {
     setEditForm({
       coinTypeId: tx.coin_type_id || '',
       saleDate: tx.sale_date ? tx.sale_date.split('T')[0] : '',
-      salePrice: tx.sale_price || 0,
-      ebayFee: tx.ebay_fee || 0,
-      advertisingFee: tx.advertising_fee || 0,
-      shippingCost: tx.shipping_cost || 0,
-      coinCost: tx.coin_cost || 0,
+      salePrice: parseFloat(tx.sale_price || 0).toFixed(2),
+      ebayFee: parseFloat(tx.ebay_fee || 0).toFixed(2),
+      advertisingFee: parseFloat(tx.advertising_fee || 0).toFixed(2),
+      shippingCost: parseFloat(tx.shipping_cost || 0).toFixed(2),
+      coinCost: parseFloat(tx.coin_cost || 0).toFixed(2),
       grade: tx.grade || '',
       quantitySold: tx.quantity_sold || 1
     })
@@ -638,6 +638,7 @@ export default function Sales() {
                   <input
                     type="number"
                     step="0.01"
+                    min="0"
                     className="input"
                     value={editForm.salePrice}
                     onChange={(e) => setEditForm({ ...editForm, salePrice: e.target.value })}
@@ -648,6 +649,7 @@ export default function Sales() {
                   <input
                     type="number"
                     step="0.01"
+                    min="0"
                     className="input"
                     value={editForm.coinCost}
                     onChange={(e) => setEditForm({ ...editForm, coinCost: e.target.value })}
@@ -661,6 +663,7 @@ export default function Sales() {
                   <input
                     type="number"
                     step="0.01"
+                    min="0"
                     className="input"
                     value={editForm.ebayFee}
                     onChange={(e) => setEditForm({ ...editForm, ebayFee: e.target.value })}
@@ -671,6 +674,7 @@ export default function Sales() {
                   <input
                     type="number"
                     step="0.01"
+                    min="0"
                     className="input"
                     value={editForm.advertisingFee}
                     onChange={(e) => setEditForm({ ...editForm, advertisingFee: e.target.value })}
@@ -681,6 +685,7 @@ export default function Sales() {
                   <input
                     type="number"
                     step="0.01"
+                    min="0"
                     className="input"
                     value={editForm.shippingCost}
                     onChange={(e) => setEditForm({ ...editForm, shippingCost: e.target.value })}
