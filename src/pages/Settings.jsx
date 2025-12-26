@@ -21,7 +21,7 @@ export default function Settings() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [showUploadModal, setShowUploadModal] = useState(false)
   const [editingCoin, setEditingCoin] = useState(null)
-  const [coinForm, setCoinForm] = useState({ name: '', catalogId: '', description: '', createBoth: true })
+  const [coinForm, setCoinForm] = useState({ name: '', catalogId: '', description: '', createBoth: true, isUngraded: false })
   const [uploadData, setUploadData] = useState(null)
   const [uploadResults, setUploadResults] = useState(null)
   const [uploading, setUploading] = useState(false)
@@ -55,10 +55,11 @@ export default function Settings() {
         name: coinForm.name || coinForm.catalogId,
         shortCode: coinForm.catalogId,
         description: coinForm.description,
-        createBoth: coinForm.createBoth
+        createBoth: coinForm.createBoth,
+        isUngraded: coinForm.isUngraded
       })
       setShowAddModal(false)
-      setCoinForm({ name: '', catalogId: '', description: '', createBoth: true })
+      setCoinForm({ name: '', catalogId: '', description: '', createBoth: true, isUngraded: false })
       fetchCoinTypes()
     } catch (error) {
       alert(error.response?.data?.error || 'Error adding coin type')
@@ -71,7 +72,8 @@ export default function Settings() {
       name: coin.name || '',
       catalogId: coin.catalog_id || coin.short_code || '',
       description: coin.description || '',
-      createBoth: false
+      createBoth: false,
+      isUngraded: coin.is_ungraded || false
     })
   }
 
@@ -84,10 +86,11 @@ export default function Settings() {
         name: coinForm.name,
         catalogId: coinForm.catalogId,
         shortCode: coinForm.catalogId, // Keep short_code in sync with catalog_id
-        description: coinForm.description
+        description: coinForm.description,
+        isUngraded: coinForm.isUngraded
       })
       setEditingCoin(null)
-      setCoinForm({ name: '', catalogId: '', description: '', createBoth: true })
+      setCoinForm({ name: '', catalogId: '', description: '', createBoth: true, isUngraded: false })
       fetchCoinTypes()
     } catch (error) {
       alert(error.response?.data?.error || 'Error updating coin type')
@@ -536,7 +539,7 @@ export default function Settings() {
                   onChange={(e) => setCoinForm({ ...coinForm, description: e.target.value })}
                 />
               </div>
-              <div className="bg-slate-50 rounded-lg p-4">
+              <div className="bg-slate-50 rounded-lg p-4 space-y-3">
                 <label className="flex items-center gap-3 cursor-pointer">
                   <input
                     type="checkbox"
@@ -549,6 +552,34 @@ export default function Settings() {
                     <p className="text-xs text-slate-500">Creates {coinForm.catalogId || 'CODE'} and {coinForm.catalogId || 'CODE'}-UNGRADED</p>
                   </div>
                 </label>
+                
+                {!coinForm.createBoth && (
+                  <div className="pt-2 border-t border-slate-200">
+                    <p className="text-sm font-medium text-slate-700 mb-2">Coin Type:</p>
+                    <div className="flex gap-3">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="coinType"
+                          checked={!coinForm.isUngraded}
+                          onChange={() => setCoinForm({ ...coinForm, isUngraded: false })}
+                          className="text-knox-600 focus:ring-knox-500"
+                        />
+                        <span className="text-sm">Graded</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="coinType"
+                          checked={coinForm.isUngraded}
+                          onChange={() => setCoinForm({ ...coinForm, isUngraded: true })}
+                          className="text-knox-600 focus:ring-knox-500"
+                        />
+                        <span className="text-sm">Ungraded</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="flex gap-3 pt-4">
                 <button type="button" onClick={() => setShowAddModal(false)} className="btn btn-secondary flex-1">
@@ -606,11 +637,37 @@ export default function Settings() {
                   onChange={(e) => setCoinForm({ ...coinForm, description: e.target.value })}
                 />
               </div>
-              {editingCoin.is_ungraded && (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                  <p className="text-sm text-amber-800">This is an ungraded variant</p>
+              <div className="bg-slate-50 rounded-lg p-4">
+                <p className="text-sm font-medium text-slate-700 mb-2">Coin Type:</p>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="editCoinType"
+                      checked={!coinForm.isUngraded}
+                      onChange={() => setCoinForm({ ...coinForm, isUngraded: false })}
+                      className="text-knox-600 focus:ring-knox-500"
+                    />
+                    <span className="text-sm flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                      Graded
+                    </span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="editCoinType"
+                      checked={coinForm.isUngraded}
+                      onChange={() => setCoinForm({ ...coinForm, isUngraded: true })}
+                      className="text-knox-600 focus:ring-knox-500"
+                    />
+                    <span className="text-sm flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                      Ungraded
+                    </span>
+                  </label>
                 </div>
-              )}
+              </div>
               <div className="flex gap-3 pt-4">
                 <button type="button" onClick={() => setEditingCoin(null)} className="btn btn-secondary flex-1">
                   Cancel

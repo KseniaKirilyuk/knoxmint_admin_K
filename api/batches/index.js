@@ -643,7 +643,7 @@ export default async function handler(req, res) {
       // Update coin type
       if (action === 'updateCoinType') {
         await ensureCoinTypeColumns();
-        const { coinTypeId, name, shortCode, catalogId, description } = req.body;
+        const { coinTypeId, name, shortCode, catalogId, description, isUngraded } = req.body;
         if (!coinTypeId) return res.status(400).json({ error: 'Coin type ID required' });
 
         const result = await query(
@@ -651,10 +651,11 @@ export default async function handler(req, res) {
             name = COALESCE($1, name),
             short_code = $2,
             catalog_id = $3,
-            description = $4
-           WHERE coin_type_id = $5
+            description = $4,
+            is_ungraded = $5
+           WHERE coin_type_id = $6
            RETURNING *`,
-          [name, shortCode || null, catalogId || null, description || null, coinTypeId]
+          [name, shortCode || null, catalogId || null, description || null, isUngraded || false, coinTypeId]
         );
         
         if (result.rows.length === 0) {
