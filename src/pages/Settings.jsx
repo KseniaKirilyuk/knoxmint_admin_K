@@ -21,7 +21,7 @@ export default function Settings() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [showUploadModal, setShowUploadModal] = useState(false)
   const [editingCoin, setEditingCoin] = useState(null)
-  const [coinForm, setCoinForm] = useState({ name: '', shortCode: '', mintCatalogNumber: '', description: '' })
+  const [coinForm, setCoinForm] = useState({ name: '', catalogId: '', description: '', createBoth: true })
   const [uploadData, setUploadData] = useState(null)
   const [uploadResults, setUploadResults] = useState(null)
   const [uploading, setUploading] = useState(false)
@@ -49,9 +49,16 @@ export default function Settings() {
   const handleAddCoin = async (e) => {
     e.preventDefault()
     try {
-      await api.post('/batches', { action: 'addCoinType', ...coinForm })
+      await api.post('/batches', { 
+        action: 'addCoinType', 
+        catalogId: coinForm.catalogId,
+        name: coinForm.name || coinForm.catalogId,
+        shortCode: coinForm.catalogId,
+        description: coinForm.description,
+        createBoth: coinForm.createBoth
+      })
       setShowAddModal(false)
-      setCoinForm({ name: '', shortCode: '', mintCatalogNumber: '', description: '' })
+      setCoinForm({ name: '', catalogId: '', description: '', createBoth: true })
       fetchCoinTypes()
     } catch (error) {
       alert(error.response?.data?.error || 'Error adding coin type')
@@ -62,9 +69,9 @@ export default function Settings() {
     setEditingCoin(coin)
     setCoinForm({
       name: coin.name || '',
-      shortCode: coin.short_code || '',
-      mintCatalogNumber: coin.mint_catalog_number || '',
-      description: coin.description || ''
+      catalogId: coin.catalog_id || coin.short_code || '',
+      description: coin.description || '',
+      createBoth: false
     })
   }
 
@@ -74,10 +81,13 @@ export default function Settings() {
       await api.post('/batches', { 
         action: 'updateCoinType', 
         coinTypeId: editingCoin.coin_type_id,
-        ...coinForm 
+        name: coinForm.name,
+        catalogId: coinForm.catalogId,
+        shortCode: coinForm.catalogId, // Keep short_code in sync with catalog_id
+        description: coinForm.description
       })
       setEditingCoin(null)
-      setCoinForm({ name: '', shortCode: '', mintCatalogNumber: '', description: '' })
+      setCoinForm({ name: '', catalogId: '', description: '', createBoth: true })
       fetchCoinTypes()
     } catch (error) {
       alert(error.response?.data?.error || 'Error updating coin type')
@@ -295,8 +305,8 @@ export default function Settings() {
                     <thead>
                       <tr>
                         <th className="table-header">Name</th>
-                        <th className="table-header">Code</th>
-                        <th className="table-header">Catalog #</th>
+                        <th className="table-header">Catalog ID</th>
+                        <th className="table-header">Type</th>
                         <th className="table-header w-24"></th>
                       </tr>
                     </thead>
@@ -305,11 +315,21 @@ export default function Settings() {
                         <tr key={coin.coin_type_id} className="hover:bg-slate-50">
                           <td className="table-cell font-medium">{coin.name}</td>
                           <td className="table-cell">
-                            <span className="px-2 py-0.5 bg-slate-100 rounded text-xs">
-                              {coin.short_code || '-'}
+                            <span className="px-2 py-0.5 bg-slate-100 rounded text-xs font-mono">
+                              {coin.catalog_id || coin.short_code || '-'}
                             </span>
                           </td>
-                          <td className="table-cell">{coin.mint_catalog_number || '-'}</td>
+                          <td className="table-cell">
+                            {coin.is_ungraded ? (
+                              <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-xs">
+                                Ungraded
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-xs">
+                                Graded
+                              </span>
+                            )}
+                          </td>
                           <td className="table-cell">
                             <div className="flex items-center justify-end gap-1">
                               <button
@@ -484,44 +504,58 @@ export default function Settings() {
             </div>
             <form onSubmit={handleAddCoin} className="p-6 space-y-4">
               <div>
-                <label className="label">Coin Name *</label>
+                <label className="label">US Mint Catalog ID *</label>
                 <input
                   type="text"
                   className="input"
-                  placeholder="e.g., Morgan, Sacagawea"
-                  value={coinForm.name}
-                  onChange={(e) => setCoinForm({ ...coinForm, name: e.target.value })}
+                  placeholder="e.g., 23XH, 25EALE"
+                  value={coinForm.catalogId}
+                  onChange={(e) => setCoinForm({ ...coinForm, catalogId: e.target.value.toUpperCase() })}
                   required
                 />
+                <p className="text-xs text-slate-500 mt-1">This is the code from the US Mint website</p>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Short Code</label>
+              <div>
+                <label className="label">Display Name</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="e.g., 2023 Peace Dollar"
+                  value={coinForm.name}
+                  onChange={(e) => setCoinForm({ ...coinForm, name: e.target.value })}
+                />
+                <p className="text-xs text-slate-500 mt-1">Optional - defaults to Catalog ID if blank</p>
+              </div>
+              <div>
+                <label className="label">Description</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="Optional description"
+                  value={coinForm.description}
+                  onChange={(e) => setCoinForm({ ...coinForm, description: e.target.value })}
+                />
+              </div>
+              <div className="bg-slate-50 rounded-lg p-4">
+                <label className="flex items-center gap-3 cursor-pointer">
                   <input
-                    type="text"
-                    className="input"
-                    placeholder="e.g., MORG"
-                    value={coinForm.shortCode}
-                    onChange={(e) => setCoinForm({ ...coinForm, shortCode: e.target.value })}
+                    type="checkbox"
+                    checked={coinForm.createBoth}
+                    onChange={(e) => setCoinForm({ ...coinForm, createBoth: e.target.checked })}
+                    className="rounded border-slate-300 text-knox-600 focus:ring-knox-500"
                   />
-                </div>
-                <div>
-                  <label className="label">Catalog #</label>
-                  <input
-                    type="text"
-                    className="input"
-                    placeholder="e.g., 25SG1"
-                    value={coinForm.mintCatalogNumber}
-                    onChange={(e) => setCoinForm({ ...coinForm, mintCatalogNumber: e.target.value })}
-                  />
-                </div>
+                  <div>
+                    <p className="font-medium text-slate-900">Create both graded & ungraded variants</p>
+                    <p className="text-xs text-slate-500">Creates {coinForm.catalogId || 'CODE'} and {coinForm.catalogId || 'CODE'}-UNGRADED</p>
+                  </div>
+                </label>
               </div>
               <div className="flex gap-3 pt-4">
                 <button type="button" onClick={() => setShowAddModal(false)} className="btn btn-secondary flex-1">
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary flex-1">
-                  Add Coin
+                  Add Coin{coinForm.createBoth ? 's' : ''}
                 </button>
               </div>
             </form>
@@ -541,38 +575,42 @@ export default function Settings() {
             </div>
             <form onSubmit={handleEditCoin} className="p-6 space-y-4">
               <div>
-                <label className="label">Coin Name *</label>
+                <label className="label">Display Name *</label>
                 <input
                   type="text"
                   className="input"
-                  placeholder="e.g., Morgan, Sacagawea"
+                  placeholder="e.g., 2023 Peace Dollar"
                   value={coinForm.name}
                   onChange={(e) => setCoinForm({ ...coinForm, name: e.target.value })}
                   required
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Short Code</label>
-                  <input
-                    type="text"
-                    className="input"
-                    placeholder="e.g., MORG"
-                    value={coinForm.shortCode}
-                    onChange={(e) => setCoinForm({ ...coinForm, shortCode: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="label">Catalog #</label>
-                  <input
-                    type="text"
-                    className="input"
-                    placeholder="e.g., 25SG1"
-                    value={coinForm.mintCatalogNumber}
-                    onChange={(e) => setCoinForm({ ...coinForm, mintCatalogNumber: e.target.value })}
-                  />
-                </div>
+              <div>
+                <label className="label">Catalog ID</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="e.g., 23XH"
+                  value={coinForm.catalogId}
+                  onChange={(e) => setCoinForm({ ...coinForm, catalogId: e.target.value.toUpperCase() })}
+                />
+                <p className="text-xs text-slate-500 mt-1">US Mint catalog code</p>
               </div>
+              <div>
+                <label className="label">Description</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="Optional description"
+                  value={coinForm.description}
+                  onChange={(e) => setCoinForm({ ...coinForm, description: e.target.value })}
+                />
+              </div>
+              {editingCoin.is_ungraded && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                  <p className="text-sm text-amber-800">This is an ungraded variant</p>
+                </div>
+              )}
               <div className="flex gap-3 pt-4">
                 <button type="button" onClick={() => setEditingCoin(null)} className="btn btn-secondary flex-1">
                   Cancel

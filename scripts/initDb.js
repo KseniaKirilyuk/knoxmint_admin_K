@@ -33,7 +33,8 @@ CREATE TABLE coin_types (
     coin_type_id SERIAL PRIMARY KEY,
     name VARCHAR(100) UNIQUE NOT NULL,
     short_code VARCHAR(20),
-    mint_catalog_number VARCHAR(50),
+    catalog_id VARCHAR(50),
+    is_ungraded BOOLEAN DEFAULT false,
     description TEXT,
     keywords TEXT[],
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -100,6 +101,8 @@ CREATE TABLE sales_transactions (
     grade VARCHAR(20),
     quantity_sold INTEGER DEFAULT 1,
     is_paid_out BOOLEAN DEFAULT false,
+    is_refund BOOLEAN DEFAULT false,
+    is_refunded BOOLEAN DEFAULT false,
     imported_from VARCHAR(50),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

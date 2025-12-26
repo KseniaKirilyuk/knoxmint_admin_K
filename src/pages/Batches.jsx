@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, Upload as UploadIcon, Calendar, Package, Users, X, Edit2, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, CheckCircle, AlertCircle, DollarSign, Check } from 'lucide-react'
+import { Plus, Upload as UploadIcon, Calendar, Package, Users, X, Edit2, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, CheckCircle, AlertCircle, DollarSign, Check, Scissors } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import api from '../lib/api'
 
@@ -19,6 +19,11 @@ export default function Batches() {
   const [showEditContribModal, setShowEditContribModal] = useState(false)
   const [editContributions, setEditContributions] = useState([])
   const [newContrib, setNewContrib] = useState({ userId: '', coinTypeId: '', quantity: 1 })
+  
+  // Split grading results
+  const [showSplitModal, setShowSplitModal] = useState(false)
+  const [splitBatchId, setSplitBatchId] = useState(null)
+  const [splitData, setSplitData] = useState([]) // [{ catalogId, coinName, total, graded, ungraded }]
   
   // Multi-batch import
   const [showMultiImportModal, setShowMultiImportModal] = useState(false)
@@ -449,6 +454,79 @@ export default function Batches() {
     }
   }
 
+  // Split grading results functions
+  const openSplitModal = (batchId, batchCoins) => {
+    setSplitBatchId(batchId)
+    // Initialize split data from batch coins (only graded variants, not already-ungraded)
+    const data = batchCoins
+      .filter(bc => !bc.is_ungraded && bc.total_contributed > 0)
+      .map(bc => ({
+        catalogId: bc.catalog_id || bc.short_code,
+        coinTypeId: bc.coin_type_id,
+        coinName: bc.coin_type_name,
+        total: bc.total_contributed,
+        graded: bc.total_contributed,
+        ungraded: 0
+      }))
+    setSplitData(data)
+    setShowSplitModal(true)
+  }
+
+  const updateSplitQuantity = (index, field, value) => {
+    setSplitData(prev => {
+      const updated = [...prev]
+      const item = { ...updated[index] }
+      const val = parseInt(value) || 0
+      
+      if (field === 'graded') {
+        item.graded = Math.min(val, item.total)
+        item.ungraded = item.total - item.graded
+      } else {
+        item.ungraded = Math.min(val, item.total)
+        item.graded = item.total - item.ungraded
+      }
+      
+      updated[index] = item
+      return updated
+    })
+  }
+
+  const handleSplitGradingResults = async () => {
+    try {
+      const splits = splitData
+        .filter(s => s.ungraded > 0)
+        .map(s => ({
+          catalogId: s.catalogId,
+          graded: s.graded,
+          ungraded: s.ungraded
+        }))
+      
+      if (splits.length === 0) {
+        alert('No coins marked as ungraded')
+        return
+      }
+      
+      await api.post('/batches?action=splitGradingResults', {
+        batchId: splitBatchId,
+        splits
+      })
+      
+      setShowSplitModal(false)
+      setSplitData([])
+      fetchData()
+      fetchCoinTypes()
+      
+      // Refresh batch details if expanded
+      if (expandedBatch === splitBatchId) {
+        const res = await api.get(`/batches?batchId=${splitBatchId}`)
+        setBatchDetails(res.data)
+      }
+    } catch (error) {
+      console.error('Error splitting grading results:', error)
+      alert('Error: ' + (error.response?.data?.error || error.message))
+    }
+  }
+
   // File upload handlers
   const handleDrag = useCallback((e) => {
     e.preventDefault()
@@ -776,9 +854,17 @@ export default function Batches() {
               {expandedBatch === batch.batch_id && batchDetails && (
                 <div className="border-t">
                   {/* Action Buttons */}
-                  <div className="px-6 py-3 bg-slate-50 flex gap-2">
+                  <div className="px-6 py-3 bg-slate-50 flex flex-wrap gap-2">
                     <button onClick={() => openUploadModal(batch.batch_id)} className="btn btn-secondary btn-sm gap-1">
                       <UploadIcon className="w-4 h-4" /> Upload Contributions
+                    </button>
+                    <button 
+                      onClick={() => openSplitModal(batch.batch_id, batchDetails.coins || [])} 
+                      className="btn btn-secondary btn-sm gap-1"
+                      disabled={!batchDetails.coins?.some(c => !c.is_ungraded && c.total_contributed > 0)}
+                      title="Split contributions into graded and ungraded"
+                    >
+                      <Scissors className="w-4 h-4" /> Split Grading Results
                     </button>
                     <button onClick={() => openEditModal(batch)} className="btn btn-secondary btn-sm gap-1">
                       <Edit2 className="w-4 h-4" /> Edit Batch
@@ -1673,6 +1759,93 @@ export default function Batches() {
                   </button>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Split Grading Results Modal */}
+      {showSplitModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col">
+            <div className="px-6 py-4 border-b flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold">Split Grading Results</h2>
+                <p className="text-sm text-slate-500">Enter how many coins were graded vs ungraded</p>
+              </div>
+              <button onClick={() => setShowSplitModal(false)} className="p-2 hover:bg-slate-100 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              {splitData.length === 0 ? (
+                <p className="text-center text-slate-500 py-8">No coin types to split</p>
+              ) : (
+                splitData.map((item, index) => (
+                  <div key={item.catalogId} className="border rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <p className="font-medium text-slate-900">{item.coinName}</p>
+                        <p className="text-sm text-slate-500 font-mono">{item.catalogId}</p>
+                      </div>
+                      <span className="text-sm text-slate-600">Total: {item.total} coins</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-emerald-700 mb-1">
+                          Graded (any grade)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          max={item.total}
+                          className="input"
+                          value={item.graded}
+                          onChange={(e) => updateSplitQuantity(index, 'graded', e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-amber-700 mb-1">
+                          Ungraded
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          max={item.total}
+                          className="input"
+                          value={item.ungraded}
+                          onChange={(e) => updateSplitQuantity(index, 'ungraded', e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    {item.ungraded > 0 && (
+                      <p className="text-xs text-amber-600 mt-2">
+                        Will create {item.catalogId}-UNGRADED variant with {item.ungraded} coins
+                      </p>
+                    )}
+                  </div>
+                ))
+              )}
+              
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <p className="text-sm text-blue-800">
+                  <strong>Note:</strong> This will proportionally split each contributor's coins into graded and ungraded pools based on the ratios you enter. Each pool will have its own cost per coin that you can set afterwards.
+                </p>
+              </div>
+            </div>
+            
+            <div className="px-6 py-4 border-t bg-slate-50 flex gap-3">
+              <button onClick={() => setShowSplitModal(false)} className="btn btn-secondary flex-1">
+                Cancel
+              </button>
+              <button 
+                onClick={handleSplitGradingResults} 
+                className="btn btn-primary flex-1"
+                disabled={!splitData.some(s => s.ungraded > 0)}
+              >
+                Split Contributions
+              </button>
             </div>
           </div>
         </div>
