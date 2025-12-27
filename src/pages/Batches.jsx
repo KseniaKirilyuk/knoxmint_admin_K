@@ -519,7 +519,7 @@ export default function Batches() {
       
       // Refresh batch details if expanded
       if (expandedBatch === splitBatchId) {
-        const res = await api.get(`/batches?batchId=${splitBatchId}`)
+        const res = await api.get(`/batches?action=details&batchId=${splitBatchId}`)
         setBatchDetails(res.data)
       }
     } catch (error) {

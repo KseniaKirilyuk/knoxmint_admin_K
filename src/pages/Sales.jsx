@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Search, Download, ChevronLeft, ChevronRight, Trash2, TrendingUp, TrendingDown, AlertTriangle, X, Wand2, Edit2 } from 'lucide-react'
 import api from '../lib/api'
 
@@ -19,6 +19,12 @@ export default function Sales() {
     offset: 0
   })
   
+  // Coin type search state
+  const [coinSearch, setCoinSearch] = useState('')
+  const [showCoinDropdown, setShowCoinDropdown] = useState(false)
+  const [selectedCoinName, setSelectedCoinName] = useState('All Coin Types')
+  const coinSearchRef = useRef(null)
+  
   // Bulk mapping state
   const [showMappingModal, setShowMappingModal] = useState(false)
   const [unmappedTitles, setUnmappedTitles] = useState([])
@@ -37,6 +43,17 @@ export default function Sales() {
   useEffect(() => {
     fetchTransactions()
   }, [filters, pagination.offset])
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (coinSearchRef.current && !coinSearchRef.current.contains(e.target)) {
+        setShowCoinDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   const fetchCoinTypes = async () => {
     try {
@@ -84,6 +101,21 @@ export default function Sales() {
     setFilters(prev => ({ ...prev, [key]: value }))
     setPagination(prev => ({ ...prev, offset: 0 }))
   }
+
+  const selectCoinType = (coinTypeId, displayName) => {
+    setFilters(prev => ({ ...prev, coinTypeId }))
+    setPagination(prev => ({ ...prev, offset: 0 }))
+    setSelectedCoinName(displayName)
+    setCoinSearch('')
+    setShowCoinDropdown(false)
+  }
+
+  const filteredCoinTypes = coinTypes.filter(ct => {
+    const search = coinSearch.toLowerCase()
+    return ct.name.toLowerCase().includes(search) ||
+           ct.short_code?.toLowerCase().includes(search) ||
+           ct.catalog_id?.toLowerCase().includes(search)
+  })
 
   const exportCSV = () => {
     const headers = ['Listing', 'Date Sold', 'Price Sold', 'Net eBay Fee', 'Advertising', 'Shipping', 'Total Payout', 'Coin Cost', 'Profit', 'Profit Share', 'Payout', 'Profit Margin', 'Type', 'Grade', 'Qty']
@@ -318,19 +350,75 @@ export default function Sales() {
       {/* Filters */}
       <div className="card p-4">
         <div className="flex flex-wrap items-center gap-4">
-          <select
-            className="input w-auto"
-            value={filters.coinTypeId}
-            onChange={(e) => handleFilterChange('coinTypeId', e.target.value)}
-          >
-            <option value="">All Coin Types</option>
-            <option value="unmapped" className="text-amber-600">
-              ⚠️ Unmapped Sales {unmappedCount > 0 ? `(${unmappedCount})` : ''}
-            </option>
-            {coinTypes.map(ct => (
-              <option key={ct.coin_type_id} value={ct.coin_type_id}>{ct.name}</option>
-            ))}
-          </select>
+          {/* Searchable Coin Type Filter */}
+          <div className="relative" ref={coinSearchRef}>
+            <div 
+              className="input w-64 flex items-center gap-2 cursor-pointer"
+              onClick={() => setShowCoinDropdown(true)}
+            >
+              <Search className="w-4 h-4 text-slate-400" />
+              {showCoinDropdown ? (
+                <input
+                  type="text"
+                  className="flex-1 outline-none bg-transparent"
+                  placeholder="Search coin types..."
+                  value={coinSearch}
+                  onChange={(e) => setCoinSearch(e.target.value)}
+                  autoFocus
+                />
+              ) : (
+                <span className={filters.coinTypeId === 'unmapped' ? 'text-amber-600' : 'text-slate-700'}>
+                  {selectedCoinName}
+                </span>
+              )}
+              {filters.coinTypeId && (
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    selectCoinType('', 'All Coin Types')
+                  }}
+                  className="p-0.5 hover:bg-slate-200 rounded"
+                >
+                  <X className="w-3 h-3 text-slate-400" />
+                </button>
+              )}
+            </div>
+            
+            {showCoinDropdown && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-80 overflow-y-auto">
+                <button
+                  onClick={() => selectCoinType('', 'All Coin Types')}
+                  className={`w-full px-3 py-2 text-left hover:bg-slate-50 ${!filters.coinTypeId ? 'bg-knox-50 text-knox-700' : ''}`}
+                >
+                  All Coin Types
+                </button>
+                <button
+                  onClick={() => selectCoinType('unmapped', `⚠️ Unmapped Sales (${unmappedCount})`)}
+                  className={`w-full px-3 py-2 text-left hover:bg-amber-50 text-amber-600 ${filters.coinTypeId === 'unmapped' ? 'bg-amber-50' : ''}`}
+                >
+                  ⚠️ Unmapped Sales {unmappedCount > 0 ? `(${unmappedCount})` : ''}
+                </button>
+                <div className="border-t border-slate-100"></div>
+                {filteredCoinTypes.length === 0 ? (
+                  <div className="px-3 py-2 text-slate-500 text-sm">No matching coins</div>
+                ) : (
+                  filteredCoinTypes.map(ct => (
+                    <button
+                      key={ct.coin_type_id}
+                      onClick={() => selectCoinType(ct.coin_type_id, ct.name)}
+                      className={`w-full px-3 py-2 text-left hover:bg-slate-50 flex items-center justify-between ${filters.coinTypeId == ct.coin_type_id ? 'bg-knox-50 text-knox-700' : ''}`}
+                    >
+                      <span>{ct.name}</span>
+                      {ct.short_code && (
+                        <span className="text-xs text-slate-400 font-mono">{ct.short_code}</span>
+                      )}
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+          
           <input
             type="date"
             className="input w-auto"
@@ -346,7 +434,10 @@ export default function Sales() {
           />
           {(filters.coinTypeId || filters.startDate || filters.endDate) && (
             <button 
-              onClick={() => setFilters({ coinTypeId: '', startDate: '', endDate: '' })}
+              onClick={() => {
+                setFilters({ coinTypeId: '', startDate: '', endDate: '' })
+                setSelectedCoinName('All Coin Types')
+              }}
               className="text-sm text-knox-600 hover:underline"
             >
               Clear filters
