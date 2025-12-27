@@ -191,27 +191,31 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: 'Batch ID and splits array required' });
         }
 
-        for (const split of splits) {
-          const { coinTypeId, catalogId, graded, ungraded } = split;
-          if (!coinTypeId || (graded === undefined && ungraded === undefined)) continue;
+        // Use a transaction to ensure all-or-nothing
+        try {
+          await query('BEGIN');
 
-          const totalCoins = (graded || 0) + (ungraded || 0);
-          if (totalCoins === 0) continue;
+          for (const split of splits) {
+            const { coinTypeId, catalogId, graded, ungraded } = split;
+            if (!coinTypeId || (graded === undefined && ungraded === undefined)) continue;
 
-          // Use the coinTypeId directly as the base coin type
-          const baseCoinTypeId = coinTypeId;
+            const totalCoins = (graded || 0) + (ungraded || 0);
+            if (totalCoins === 0) continue;
 
-          // Get base coin info for creating ungraded variant
-          const baseCoinInfo = await query(
-            'SELECT name, short_code, catalog_id FROM coin_types WHERE coin_type_id = $1', 
-            [baseCoinTypeId]
-          );
-          
-          if (baseCoinInfo.rows.length === 0) continue;
-          
-          const baseName = baseCoinInfo.rows[0].name.replace(' (Ungraded)', '');
-          const baseCode = baseCoinInfo.rows[0].short_code?.replace('-UNGRADED', '') || catalogId;
-          const baseCatalogId = baseCoinInfo.rows[0].catalog_id || catalogId;
+            // Use the coinTypeId directly as the base coin type
+            const baseCoinTypeId = coinTypeId;
+
+            // Get base coin info for creating ungraded variant
+            const baseCoinInfo = await query(
+              'SELECT name, short_code, catalog_id FROM coin_types WHERE coin_type_id = $1', 
+              [baseCoinTypeId]
+            );
+            
+            if (baseCoinInfo.rows.length === 0) continue;
+            
+            const baseName = baseCoinInfo.rows[0].name.replace(' (Ungraded)', '');
+            const baseCode = baseCoinInfo.rows[0].short_code?.replace('-UNGRADED', '') || catalogId;
+            const baseCatalogId = baseCoinInfo.rows[0].catalog_id || catalogId;
 
           // Find or create the ungraded variant
           let ungradedCoinTypeId;
@@ -295,7 +299,13 @@ export default async function handler(req, res) {
           `, [batchId, ungradedCoinTypeId]);
         }
 
-        return res.json({ success: true });
+          await query('COMMIT');
+          return res.json({ success: true });
+        } catch (splitError) {
+          await query('ROLLBACK');
+          console.error('Split grading error:', splitError);
+          return res.status(500).json({ error: 'Server error: ' + splitError.message });
+        }
       }
 
       // Bulk import multiple batches

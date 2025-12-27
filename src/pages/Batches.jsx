@@ -572,13 +572,16 @@ export default function Batches() {
         return
       }
 
-      // Find coin columns (columns with "Qty" in header)
-      const coinColumns = []
+      // Find coin columns - try two formats:
+      // Format 1: Columns with "Qty" in header (e.g., "Sacagawea Qty")
+      // Format 2: Columns with coin codes directly (e.g., "25SG1", "25EALE")
+      let coinColumns = []
+      
+      // First try Format 1: "Qty" columns
       headers.forEach((h, idx) => {
         if (idx === memberColIdx) return
         const headerStr = String(h).toLowerCase()
         if (headerStr.includes('qty') || headerStr.includes('quantity')) {
-          // Extract coin type name (remove "Qty" suffix)
           let coinName = String(h).replace(/\s*qty\s*/i, '').replace(/\s*quantity\s*/i, '').trim()
           if (coinName) {
             coinColumns.push({ idx, name: coinName })
@@ -586,8 +589,24 @@ export default function Batches() {
         }
       })
 
+      // If no "Qty" columns found, try Format 2: direct coin codes
       if (coinColumns.length === 0) {
-        setError('Could not find coin quantity columns (e.g., "Sacagawea Qty")')
+        headers.forEach((h, idx) => {
+          if (idx === memberColIdx) return
+          const headerStr = String(h).trim()
+          // Skip empty headers and common non-coin columns
+          if (!headerStr || 
+              headerStr.toLowerCase() === 'total' ||
+              headerStr.toLowerCase() === 'notes' ||
+              headerStr.toLowerCase() === 'email') return
+          
+          // Treat this column as a coin code
+          coinColumns.push({ idx, name: headerStr, isCode: true })
+        })
+      }
+
+      if (coinColumns.length === 0) {
+        setError('Could not find coin columns. Use either "Coin Name Qty" headers or coin codes like "25SG1"')
         return
       }
 
@@ -596,9 +615,11 @@ export default function Batches() {
       const unmatchedCoins = []
       
       for (const col of coinColumns) {
+        // Try matching by name, short_code, or catalog_id
         const match = coinTypes.find(ct => 
           ct.name.toLowerCase() === col.name.toLowerCase() ||
-          ct.short_code?.toLowerCase() === col.name.toLowerCase()
+          ct.short_code?.toLowerCase() === col.name.toLowerCase() ||
+          ct.catalog_id?.toLowerCase() === col.name.toLowerCase()
         )
         if (match) {
           matchedCoins.push({ ...col, coinTypeId: match.coin_type_id, matchedName: match.name })
@@ -1204,7 +1225,7 @@ export default function Batches() {
                   <UploadIcon className="w-10 h-10 text-slate-400 mx-auto mb-3" />
                   <p className="text-slate-600 mb-2">Drop your contributions spreadsheet here</p>
                   <p className="text-sm text-slate-500 mb-4">
-                    Format: Slack Name column + coin type columns (e.g., "Sacagawea Qty")
+                    Format: Slack Name column + coin codes (e.g., 25SG1, 25EALE)
                   </p>
                   <input
                     type="file"
