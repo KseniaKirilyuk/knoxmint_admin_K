@@ -27,6 +27,8 @@ async function ensureCoinTypeColumns() {
   try {
     await query(`ALTER TABLE coin_types ADD COLUMN IF NOT EXISTS catalog_id VARCHAR(50)`);
     await query(`ALTER TABLE coin_types ADD COLUMN IF NOT EXISTS is_ungraded BOOLEAN DEFAULT false`);
+    // Increase short_code size to accommodate "-UNGRADED" suffix
+    await query(`ALTER TABLE coin_types ALTER COLUMN short_code TYPE VARCHAR(50)`);
     // Migrate existing coins - set catalog_id from short_code if not set
     await query(`UPDATE coin_types SET catalog_id = short_code WHERE catalog_id IS NULL AND short_code IS NOT NULL`);
   } catch (e) {
