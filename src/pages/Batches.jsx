@@ -496,6 +496,7 @@ export default function Batches() {
       const splits = splitData
         .filter(s => s.ungraded > 0)
         .map(s => ({
+          coinTypeId: s.coinTypeId,
           catalogId: s.catalogId,
           graded: s.graded,
           ungraded: s.ungraded

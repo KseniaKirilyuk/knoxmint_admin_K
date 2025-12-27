@@ -183,46 +183,49 @@ export default async function handler(req, res) {
       if (action === 'splitGradingResults') {
         await ensureCoinTypeColumns();
         const { batchId, splits } = req.body;
-        // splits = [{ catalogId: '23XH', graded: 80, ungraded: 20 }, ...]
+        // splits = [{ coinTypeId: 1, catalogId: '23XH', graded: 80, ungraded: 20 }, ...]
         
         if (!batchId || !splits || !Array.isArray(splits)) {
           return res.status(400).json({ error: 'Batch ID and splits array required' });
         }
 
         for (const split of splits) {
-          const { catalogId, graded, ungraded } = split;
-          if (!catalogId || (graded === undefined && ungraded === undefined)) continue;
+          const { coinTypeId, catalogId, graded, ungraded } = split;
+          if (!coinTypeId || (graded === undefined && ungraded === undefined)) continue;
 
           const totalCoins = (graded || 0) + (ungraded || 0);
           if (totalCoins === 0) continue;
 
-          // Find the base coin type (the one contributions are currently mapped to)
-          const baseCoinType = await query(
-            `SELECT coin_type_id FROM coin_types WHERE catalog_id = $1 AND (is_ungraded = false OR is_ungraded IS NULL) LIMIT 1`,
-            [catalogId]
+          // Use the coinTypeId directly as the base coin type
+          const baseCoinTypeId = coinTypeId;
+
+          // Get base coin info for creating ungraded variant
+          const baseCoinInfo = await query(
+            'SELECT name, short_code, catalog_id FROM coin_types WHERE coin_type_id = $1', 
+            [baseCoinTypeId]
           );
           
-          if (baseCoinType.rows.length === 0) continue;
-          const baseCoinTypeId = baseCoinType.rows[0].coin_type_id;
+          if (baseCoinInfo.rows.length === 0) continue;
+          
+          const baseName = baseCoinInfo.rows[0].name.replace(' (Ungraded)', '');
+          const baseCode = baseCoinInfo.rows[0].short_code?.replace('-UNGRADED', '') || catalogId;
+          const baseCatalogId = baseCoinInfo.rows[0].catalog_id || catalogId;
 
           // Find or create the ungraded variant
           let ungradedCoinTypeId;
           const ungradedCoin = await query(
-            `SELECT coin_type_id FROM coin_types WHERE catalog_id = $1 AND is_ungraded = true LIMIT 1`,
-            [catalogId]
+            `SELECT coin_type_id FROM coin_types 
+             WHERE (catalog_id = $1 OR short_code = $2) AND is_ungraded = true LIMIT 1`,
+            [baseCatalogId, `${baseCode}-UNGRADED`]
           );
           
           if (ungradedCoin.rows.length === 0) {
             // Create ungraded variant
-            const baseCoinInfo = await query('SELECT name, short_code FROM coin_types WHERE coin_type_id = $1', [baseCoinTypeId]);
-            const baseName = baseCoinInfo.rows[0].name.replace(' (Ungraded)', '');
-            const baseCode = baseCoinInfo.rows[0].short_code?.replace('-UNGRADED', '') || catalogId;
-            
             const newUngraded = await query(
               `INSERT INTO coin_types (name, short_code, catalog_id, is_ungraded, keywords)
                VALUES ($1, $2, $3, true, $4)
                RETURNING coin_type_id`,
-              [`${baseName} (Ungraded)`, `${baseCode}-UNGRADED`, catalogId, [baseName, catalogId]]
+              [`${baseName} (Ungraded)`, `${baseCode}-UNGRADED`, baseCatalogId, [baseName, baseCatalogId]]
             );
             ungradedCoinTypeId = newUngraded.rows[0].coin_type_id;
           } else {
@@ -237,7 +240,6 @@ export default async function handler(req, res) {
           );
 
           const gradedRatio = graded / totalCoins;
-          const ungradedRatio = ungraded / totalCoins;
 
           // Split each contribution
           for (const contrib of contributions.rows) {
@@ -266,7 +268,7 @@ export default async function handler(req, res) {
             }
           }
 
-          // Update batch_coins totals
+          // Update batch_coins totals for graded
           await query(`
             INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed)
             SELECT $1, $2, COALESCE(SUM(quantity), 0) 
@@ -278,6 +280,7 @@ export default async function handler(req, res) {
             )
           `, [batchId, baseCoinTypeId]);
 
+          // Update batch_coins totals for ungraded
           await query(`
             INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed)
             SELECT $1, $2, COALESCE(SUM(quantity), 0) 
