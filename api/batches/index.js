@@ -185,100 +185,145 @@ export default async function handler(req, res) {
       if (action === 'splitGradingResults') {
         await ensureCoinTypeColumns();
         const { batchId, splits } = req.body;
-        // splits = [{ coinTypeId: 1, catalogId: '23XH', graded: 80, ungraded: 20 }, ...]
+        // splits = [{ coinTypeId: 1, ungradedCoinTypeId: 2, catalogId: '23XH', graded: 80, ungraded: 20 }, ...]
         
         if (!batchId || !splits || !Array.isArray(splits)) {
           return res.status(400).json({ error: 'Batch ID and splits array required' });
         }
 
-        // Filter out splits with no ungraded coins
-        const validSplits = splits.filter(s => s.ungraded > 0);
-        if (validSplits.length === 0) {
-          return res.status(400).json({ error: 'No coins marked as ungraded' });
+        // Process all splits (including adjustments where ungraded might be 0)
+        if (splits.length === 0) {
+          return res.status(400).json({ error: 'No split data provided' });
         }
 
         const results = [];
 
-        for (const split of validSplits) {
-          const { coinTypeId, catalogId, graded, ungraded } = split;
+        for (const split of splits) {
+          const { coinTypeId, ungradedCoinTypeId: existingUngradedId, catalogId, graded, ungraded } = split;
           
           const totalCoins = (graded || 0) + (ungraded || 0);
-          if (totalCoins === 0) continue;
-
-          // Get base coin info for creating ungraded variant
-          const baseCoinInfo = await query(
-            'SELECT name, short_code, catalog_id FROM coin_types WHERE coin_type_id = $1', 
-            [coinTypeId]
-          );
-          
-          if (baseCoinInfo.rows.length === 0) {
-            results.push({ coinTypeId, error: 'Coin type not found' });
+          if (totalCoins === 0) {
+            results.push({ catalogId, error: 'Total is 0' });
             continue;
           }
-          
-          const baseName = baseCoinInfo.rows[0].name.replace(' (Ungraded)', '');
-          const baseCode = baseCoinInfo.rows[0].short_code?.replace('-UNGRADED', '') || catalogId || String(coinTypeId);
-          const baseCatalogId = baseCoinInfo.rows[0].catalog_id || catalogId || baseCode;
 
-          // Find or create the ungraded variant
-          let ungradedCoinTypeId;
-          const ungradedCoin = await query(
-            `SELECT coin_type_id FROM coin_types 
-             WHERE (catalog_id = $1 AND is_ungraded = true) 
-                OR (short_code = $2 AND is_ungraded = true) LIMIT 1`,
-            [baseCatalogId, `${baseCode}-UNGRADED`]
-          );
+          // Get graded coin info
+          let gradedCoinTypeId = coinTypeId;
+          let baseName, baseCode, baseCatalogId;
           
-          if (ungradedCoin.rows.length === 0) {
-            // Create ungraded variant with unique name
-            const ungradedName = `${baseName} (Ungraded)`;
-            
-            // Check if name already exists
-            const existingName = await query(
-              'SELECT coin_type_id FROM coin_types WHERE name = $1',
-              [ungradedName]
+          if (coinTypeId) {
+            const baseCoinInfo = await query(
+              'SELECT name, short_code, catalog_id FROM coin_types WHERE coin_type_id = $1', 
+              [coinTypeId]
             );
             
-            if (existingName.rows.length > 0) {
-              ungradedCoinTypeId = existingName.rows[0].coin_type_id;
-              // Update it to be marked as ungraded
-              await query(
-                'UPDATE coin_types SET is_ungraded = true, catalog_id = $1 WHERE coin_type_id = $2',
-                [baseCatalogId, ungradedCoinTypeId]
-              );
-            } else {
-              try {
-                const newUngraded = await query(
-                  `INSERT INTO coin_types (name, short_code, catalog_id, is_ungraded, keywords)
-                   VALUES ($1, $2, $3, true, $4)
-                   RETURNING coin_type_id`,
-                  [ungradedName, `${baseCode}-UNGRADED`, baseCatalogId, [baseName, baseCatalogId]]
-                );
-                ungradedCoinTypeId = newUngraded.rows[0].coin_type_id;
-              } catch (insertError) {
-                // If insert fails due to duplicate, try to find it
-                console.error('Insert failed, trying to find existing:', insertError.message);
-                const retry = await query('SELECT coin_type_id FROM coin_types WHERE name = $1 OR short_code = $2', [ungradedName, `${baseCode}-UNGRADED`]);
-                if (retry.rows.length > 0) {
-                  ungradedCoinTypeId = retry.rows[0].coin_type_id;
-                } else {
-                  throw new Error(`Failed to create ungraded coin type: ${insertError.message}`);
-                }
-              }
+            if (baseCoinInfo.rows.length === 0) {
+              results.push({ catalogId, coinTypeId, error: 'Graded coin type not found' });
+              continue;
             }
-          } else {
-            ungradedCoinTypeId = ungradedCoin.rows[0].coin_type_id;
+            
+            baseName = baseCoinInfo.rows[0].name.replace(' (Ungraded)', '');
+            baseCode = baseCoinInfo.rows[0].short_code?.replace('-UNGRADED', '') || catalogId || String(coinTypeId);
+            baseCatalogId = baseCoinInfo.rows[0].catalog_id || catalogId || baseCode;
+          } else if (existingUngradedId) {
+            // Only have ungraded, need to find or create graded
+            const ungradedInfo = await query(
+              'SELECT name, short_code, catalog_id FROM coin_types WHERE coin_type_id = $1',
+              [existingUngradedId]
+            );
+            if (ungradedInfo.rows.length > 0) {
+              baseName = ungradedInfo.rows[0].name.replace(' (Ungraded)', '');
+              baseCode = ungradedInfo.rows[0].short_code?.replace('-UNGRADED', '') || catalogId;
+              baseCatalogId = ungradedInfo.rows[0].catalog_id || catalogId;
+            }
+          }
+          
+          if (!baseName) {
+            results.push({ catalogId, error: 'Could not determine coin type info' });
+            continue;
           }
 
-          // Get all contributions for this batch and base coin type
-          const contributions = await query(
+          // Find or create the ungraded variant
+          let ungradedCoinTypeId = existingUngradedId; // Use existing if provided
+          
+          if (!ungradedCoinTypeId) {
+            const ungradedCoin = await query(
+              `SELECT coin_type_id FROM coin_types 
+               WHERE (catalog_id = $1 AND is_ungraded = true) 
+                  OR (short_code = $2 AND is_ungraded = true) LIMIT 1`,
+              [baseCatalogId, `${baseCode}-UNGRADED`]
+            );
+            
+            if (ungradedCoin.rows.length === 0) {
+              // Create ungraded variant with unique name
+              const ungradedName = `${baseName} (Ungraded)`;
+              
+              // Check if name already exists
+              const existingName = await query(
+                'SELECT coin_type_id FROM coin_types WHERE name = $1',
+                [ungradedName]
+              );
+              
+              if (existingName.rows.length > 0) {
+                ungradedCoinTypeId = existingName.rows[0].coin_type_id;
+                // Update it to be marked as ungraded
+                await query(
+                  'UPDATE coin_types SET is_ungraded = true, catalog_id = $1 WHERE coin_type_id = $2',
+                  [baseCatalogId, ungradedCoinTypeId]
+                );
+              } else {
+                try {
+                  const newUngraded = await query(
+                    `INSERT INTO coin_types (name, short_code, catalog_id, is_ungraded, keywords)
+                     VALUES ($1, $2, $3, true, $4)
+                     RETURNING coin_type_id`,
+                    [ungradedName, `${baseCode}-UNGRADED`, baseCatalogId, [baseName, baseCatalogId]]
+                  );
+                  ungradedCoinTypeId = newUngraded.rows[0].coin_type_id;
+                } catch (insertError) {
+                  // If insert fails due to duplicate, try to find it
+                  console.error('Insert failed, trying to find existing:', insertError.message);
+                  const retry = await query('SELECT coin_type_id FROM coin_types WHERE name = $1 OR short_code = $2', [ungradedName, `${baseCode}-UNGRADED`]);
+                  if (retry.rows.length > 0) {
+                    ungradedCoinTypeId = retry.rows[0].coin_type_id;
+                  } else {
+                    throw new Error(`Failed to create ungraded coin type: ${insertError.message}`);
+                  }
+                }
+              }
+            } else {
+              ungradedCoinTypeId = ungradedCoin.rows[0].coin_type_id;
+            }
+          }
+
+          // Get all contributions for BOTH graded and ungraded coin types
+          const gradedContribs = gradedCoinTypeId ? await query(
             `SELECT id, user_id, quantity FROM user_contributions 
              WHERE batch_id = $1 AND coin_type_id = $2`,
-            [batchId, coinTypeId]
-          );
+            [batchId, gradedCoinTypeId]
+          ) : { rows: [] };
+          
+          const ungradedContribs = ungradedCoinTypeId ? await query(
+            `SELECT id, user_id, quantity FROM user_contributions 
+             WHERE batch_id = $1 AND coin_type_id = $2`,
+            [batchId, ungradedCoinTypeId]
+          ) : { rows: [] };
+          
+          // Combine contributions by user
+          const userTotals = {};
+          gradedContribs.rows.forEach(c => {
+            if (!userTotals[c.user_id]) userTotals[c.user_id] = { graded: 0, ungraded: 0, gradedId: null, ungradedId: null };
+            userTotals[c.user_id].graded = c.quantity;
+            userTotals[c.user_id].gradedId = c.id;
+          });
+          ungradedContribs.rows.forEach(c => {
+            if (!userTotals[c.user_id]) userTotals[c.user_id] = { graded: 0, ungraded: 0, gradedId: null, ungradedId: null };
+            userTotals[c.user_id].ungraded = c.quantity;
+            userTotals[c.user_id].ungradedId = c.id;
+          });
 
-          if (contributions.rows.length === 0) {
-            results.push({ coinTypeId, error: 'No contributions found', ungradedCoinTypeId });
+          if (Object.keys(userTotals).length === 0) {
+            results.push({ catalogId, error: 'No contributions found' });
             continue;
           }
 
@@ -286,84 +331,97 @@ export default async function handler(req, res) {
           let totalUngraded = 0;
 
           // Use cumulative rounding to properly distribute coins
-          // This ensures the total split matches the requested amounts
           let cumulativeIdealUngraded = 0;
           let cumulativeActualUngraded = 0;
+          
+          const userIds = Object.keys(userTotals);
 
-          // Split each contribution
-          for (const contrib of contributions.rows) {
-            const originalQty = contrib.quantity;
+          // Split each user's contribution
+          for (const userId of userIds) {
+            const userTotal = userTotals[userId];
+            const originalTotal = userTotal.graded + userTotal.ungraded;
             
-            // Calculate cumulative ideal ungraded up to this point
-            cumulativeIdealUngraded += (originalQty / totalCoins) * ungraded;
+            // Calculate this user's ideal ungraded amount
+            cumulativeIdealUngraded += (originalTotal / totalCoins) * ungraded;
             
-            // This person's ungraded = round(cumulative ideal) - what we've already assigned
-            let ungradedQty = Math.round(cumulativeIdealUngraded) - cumulativeActualUngraded;
+            // This user's ungraded = round(cumulative ideal) - what we've already assigned
+            let newUngradedQty = Math.round(cumulativeIdealUngraded) - cumulativeActualUngraded;
+            newUngradedQty = Math.min(newUngradedQty, originalTotal);
+            newUngradedQty = Math.max(newUngradedQty, 0);
             
-            // Ensure we don't exceed original quantity
-            ungradedQty = Math.min(ungradedQty, originalQty);
-            ungradedQty = Math.max(ungradedQty, 0);
-            
-            const gradedQty = originalQty - ungradedQty;
-            
-            cumulativeActualUngraded += ungradedQty;
+            const newGradedQty = originalTotal - newUngradedQty;
+            cumulativeActualUngraded += newUngradedQty;
 
-            // Update or delete graded contribution
-            if (gradedQty > 0) {
-              await query(
-                `UPDATE user_contributions SET quantity = $1 WHERE id = $2`,
-                [gradedQty, contrib.id]
-              );
-              totalGraded += gradedQty;
-            } else {
-              await query('DELETE FROM user_contributions WHERE id = $1', [contrib.id]);
+            // Update graded contribution
+            if (newGradedQty > 0 && gradedCoinTypeId) {
+              if (userTotal.gradedId) {
+                await query('UPDATE user_contributions SET quantity = $1 WHERE id = $2', [newGradedQty, userTotal.gradedId]);
+              } else {
+                await query(
+                  `INSERT INTO user_contributions (user_id, batch_id, coin_type_id, quantity)
+                   VALUES ($1, $2, $3, $4)
+                   ON CONFLICT (user_id, batch_id, coin_type_id) DO UPDATE SET quantity = EXCLUDED.quantity`,
+                  [userId, batchId, gradedCoinTypeId, newGradedQty]
+                );
+              }
+              totalGraded += newGradedQty;
+            } else if (userTotal.gradedId) {
+              await query('DELETE FROM user_contributions WHERE id = $1', [userTotal.gradedId]);
             }
 
-            // Insert ungraded contribution
-            if (ungradedQty > 0) {
-              await query(
-                `INSERT INTO user_contributions (user_id, batch_id, coin_type_id, quantity)
-                 VALUES ($1, $2, $3, $4)
-                 ON CONFLICT (user_id, batch_id, coin_type_id)
-                 DO UPDATE SET quantity = EXCLUDED.quantity`,
-                [contrib.user_id, batchId, ungradedCoinTypeId, ungradedQty]
-              );
-              totalUngraded += ungradedQty;
+            // Update ungraded contribution
+            if (newUngradedQty > 0 && ungradedCoinTypeId) {
+              if (userTotal.ungradedId) {
+                await query('UPDATE user_contributions SET quantity = $1 WHERE id = $2', [newUngradedQty, userTotal.ungradedId]);
+              } else {
+                await query(
+                  `INSERT INTO user_contributions (user_id, batch_id, coin_type_id, quantity)
+                   VALUES ($1, $2, $3, $4)
+                   ON CONFLICT (user_id, batch_id, coin_type_id) DO UPDATE SET quantity = EXCLUDED.quantity`,
+                  [userId, batchId, ungradedCoinTypeId, newUngradedQty]
+                );
+              }
+              totalUngraded += newUngradedQty;
+            } else if (userTotal.ungradedId) {
+              await query('DELETE FROM user_contributions WHERE id = $1', [userTotal.ungradedId]);
             }
           }
 
-          // Update batch_coins totals for graded - use simple upsert
-          const gradedSum = await query(
-            'SELECT COALESCE(SUM(quantity), 0) as total FROM user_contributions WHERE batch_id = $1 AND coin_type_id = $2',
-            [batchId, coinTypeId]
-          );
-          await query(`
-            INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed)
-            VALUES ($1, $2, $3)
-            ON CONFLICT (batch_id, coin_type_id)
-            DO UPDATE SET total_contributed = $3
-          `, [batchId, coinTypeId, parseInt(gradedSum.rows[0].total)]);
+          // Update batch_coins totals for graded
+          if (gradedCoinTypeId) {
+            const gradedSum = await query(
+              'SELECT COALESCE(SUM(quantity), 0) as total FROM user_contributions WHERE batch_id = $1 AND coin_type_id = $2',
+              [batchId, gradedCoinTypeId]
+            );
+            await query(`
+              INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed)
+              VALUES ($1, $2, $3)
+              ON CONFLICT (batch_id, coin_type_id)
+              DO UPDATE SET total_contributed = $3
+            `, [batchId, gradedCoinTypeId, parseInt(gradedSum.rows[0].total)]);
+          }
 
-          // Update batch_coins totals for ungraded - use simple upsert
-          const ungradedSum = await query(
-            'SELECT COALESCE(SUM(quantity), 0) as total FROM user_contributions WHERE batch_id = $1 AND coin_type_id = $2',
-            [batchId, ungradedCoinTypeId]
-          );
-          await query(`
-            INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed)
-            VALUES ($1, $2, $3)
-            ON CONFLICT (batch_id, coin_type_id)
-            DO UPDATE SET total_contributed = $3
-          `, [batchId, ungradedCoinTypeId, parseInt(ungradedSum.rows[0].total)]);
+          // Update batch_coins totals for ungraded
+          if (ungradedCoinTypeId) {
+            const ungradedSum = await query(
+              'SELECT COALESCE(SUM(quantity), 0) as total FROM user_contributions WHERE batch_id = $1 AND coin_type_id = $2',
+              [batchId, ungradedCoinTypeId]
+            );
+            await query(`
+              INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed)
+              VALUES ($1, $2, $3)
+              ON CONFLICT (batch_id, coin_type_id)
+              DO UPDATE SET total_contributed = $3
+            `, [batchId, ungradedCoinTypeId, parseInt(ungradedSum.rows[0].total)]);
+          }
 
           results.push({ 
-            coinTypeId, 
+            catalogId,
+            coinTypeId: gradedCoinTypeId, 
             ungradedCoinTypeId, 
             totalGraded, 
             totalUngraded,
-            contributionsSplit: contributions.rows.length,
-            batchCoinsGraded: parseInt(gradedSum.rows[0].total),
-            batchCoinsUngraded: parseInt(ungradedSum.rows[0].total)
+            usersSplit: userIds.length
           });
         }
 
