@@ -516,7 +516,9 @@ export default function Batches() {
     setSplitData(prev => {
       const updated = [...prev]
       const item = { ...updated[index] }
-      const val = parseInt(value) || 0
+      // Remove leading zeros and parse - handle empty string as 0
+      const cleanValue = value.toString().replace(/^0+/, '') || '0'
+      const val = Math.max(0, parseInt(cleanValue) || 0)
       
       if (field === 'graded') {
         item.graded = Math.min(val, item.total)
@@ -1887,6 +1889,7 @@ export default function Batches() {
                           className="input"
                           value={item.graded}
                           onChange={(e) => updateSplitQuantity(index, 'graded', e.target.value)}
+                          onFocus={(e) => e.target.select()}
                         />
                       </div>
                       <div>
@@ -1903,6 +1906,7 @@ export default function Batches() {
                           className="input"
                           value={item.ungraded}
                           onChange={(e) => updateSplitQuantity(index, 'ungraded', e.target.value)}
+                          onFocus={(e) => e.target.select()}
                         />
                       </div>
                     </div>
