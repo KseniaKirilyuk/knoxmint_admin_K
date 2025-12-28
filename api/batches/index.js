@@ -13,6 +13,7 @@ function verifyToken(req) {
 async function ensureCostColumn() {
   try {
     await query(`ALTER TABLE batch_coins ADD COLUMN IF NOT EXISTS cost_per_coin DECIMAL(10, 2)`);
+    await query(`ALTER TABLE batch_coins ADD COLUMN IF NOT EXISTS grading_cost_per_coin DECIMAL(10, 2) DEFAULT 0`);
     // Migrate old prices if they exist (and are positive)
     await query(`UPDATE batch_coins SET cost_per_coin = original_price WHERE cost_per_coin IS NULL AND original_price IS NOT NULL AND original_price > 0`);
     // Fix any 0 values to null (0 = not set)
@@ -984,26 +985,49 @@ export default async function handler(req, res) {
         return res.json({ success: true });
       }
 
-      // Update coin prices in batch (simple cost_per_coin)
-      if (batchId && coinPrices) {
+      // Update coin prices in batch (cost_per_coin and grading_cost_per_coin)
+      if (batchId && (coinPrices || req.body.gradingCosts)) {
         await ensureCostColumn();
+        const gradingCosts = req.body.gradingCosts || {};
         
-        for (const [coinTypeId, price] of Object.entries(coinPrices)) {
-          // Only save if we have a valid positive price, otherwise null
-          let priceValue = null;
-          if (price !== '' && price !== null && price !== undefined) {
-            const parsed = parseFloat(price);
-            // Only save positive values (0 = not set)
-            if (!isNaN(parsed) && parsed > 0) {
-              priceValue = parsed;
+        // Update cost per coin
+        if (coinPrices) {
+          for (const [coinTypeId, price] of Object.entries(coinPrices)) {
+            // Only save if we have a valid positive price, otherwise null
+            let priceValue = null;
+            if (price !== '' && price !== null && price !== undefined) {
+              const parsed = parseFloat(price);
+              // Only save positive values (0 = not set)
+              if (!isNaN(parsed) && parsed > 0) {
+                priceValue = parsed;
+              }
             }
+            await query(`
+              UPDATE batch_coins 
+              SET cost_per_coin = $1, updated_at = CURRENT_TIMESTAMP
+              WHERE batch_id = $2 AND coin_type_id = $3
+            `, [priceValue, batchId, coinTypeId]);
           }
-          await query(`
-            UPDATE batch_coins 
-            SET cost_per_coin = $1, updated_at = CURRENT_TIMESTAMP
-            WHERE batch_id = $2 AND coin_type_id = $3
-          `, [priceValue, batchId, coinTypeId]);
         }
+        
+        // Update grading cost per coin
+        if (gradingCosts) {
+          for (const [coinTypeId, cost] of Object.entries(gradingCosts)) {
+            let costValue = 0;
+            if (cost !== '' && cost !== null && cost !== undefined) {
+              const parsed = parseFloat(cost);
+              if (!isNaN(parsed) && parsed >= 0) {
+                costValue = parsed;
+              }
+            }
+            await query(`
+              UPDATE batch_coins 
+              SET grading_cost_per_coin = $1, updated_at = CURRENT_TIMESTAMP
+              WHERE batch_id = $2 AND coin_type_id = $3
+            `, [costValue, batchId, coinTypeId]);
+          }
+        }
+        
         return res.json({ success: true });
       }
 

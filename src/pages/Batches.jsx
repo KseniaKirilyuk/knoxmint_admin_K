@@ -48,6 +48,7 @@ export default function Batches() {
   const [dragActive, setDragActive] = useState(false)
   const [error, setError] = useState('')
   const [coinPrices, setCoinPrices] = useState({})
+  const [gradingCosts, setGradingCosts] = useState({})
   const [originalPrices, setOriginalPrices] = useState({}) // Track original prices to detect changes
   const [coinMappings, setCoinMappings] = useState({}) // Maps unmatched coin names to selected coin_type_id
 
@@ -181,9 +182,25 @@ export default function Batches() {
         }
       }
       
-      // Only make API call if there are prices to save
-      if (Object.keys(pricesToSave).length > 0) {
-        await api.put(`/batches?batchId=${selectedBatchId}`, { coinPrices: pricesToSave })
+      // Process grading costs (can be 0 for ungraded coins)
+      const gradingToSave = {}
+      for (const [key, value] of Object.entries(gradingCosts)) {
+        if (value === '' || value === null || value === undefined) {
+          gradingToSave[key] = 0
+        } else {
+          const num = parseFloat(value)
+          if (!isNaN(num) && num >= 0) {
+            gradingToSave[key] = num
+          }
+        }
+      }
+      
+      // Make API call if there are prices or grading costs to save
+      if (Object.keys(pricesToSave).length > 0 || Object.keys(gradingToSave).length > 0) {
+        await api.put(`/batches?batchId=${selectedBatchId}`, { 
+          coinPrices: pricesToSave,
+          gradingCosts: gradingToSave
+        })
       }
       
       setShowPricesModal(false)
@@ -961,8 +978,9 @@ export default function Batches() {
                         <h4 className="font-medium text-slate-900">Coin Types & Cost per Coin</h4>
                         <button 
                           onClick={() => {
-                            // Initialize prices from current batch coins
+                            // Initialize prices and grading costs from current batch coins
                             const prices = {}
+                            const grading = {}
                             batchDetails.coins.forEach(c => {
                               const key = String(c.coin_type_id)
                               // Get raw value and ensure it's a number
@@ -974,8 +992,17 @@ export default function Batches() {
                               } else {
                                 prices[key] = ''
                               }
+                              // Get grading cost
+                              const gradingVal = c.grading_cost_per_coin
+                              const gradingNum = typeof gradingVal === 'number' ? gradingVal : parseFloat(gradingVal)
+                              if (!isNaN(gradingNum) && gradingNum > 0) {
+                                grading[key] = String(gradingNum)
+                              } else {
+                                grading[key] = ''
+                              }
                             })
                             setCoinPrices(prices)
+                            setGradingCosts(grading)
                             setOriginalPrices({...prices})
                             setSelectedBatchId(expandedBatch)
                             setShowPricesModal(true)
@@ -988,14 +1015,26 @@ export default function Batches() {
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         {batchDetails.coins.map(coin => {
                           const price = parseFloat(coin.cost_per_coin)
+                          const gradingCost = parseFloat(coin.grading_cost_per_coin) || 0
                           const hasValidPrice = coin.cost_per_coin !== null && coin.cost_per_coin !== undefined && !isNaN(price) && price > 0
+                          const totalCost = (hasValidPrice ? price : 0) + gradingCost
                           return (
                             <div key={coin.id} className="p-3 bg-slate-50 rounded-lg">
-                              <p className="font-medium text-sm">{coin.coin_type_name}</p>
+                              <div className="flex items-center justify-between">
+                                <p className="font-medium text-sm">{coin.coin_type_name}</p>
+                                {coin.is_ungraded && (
+                                  <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">UG</span>
+                                )}
+                              </div>
                               <p className="text-xs text-slate-500">{coin.total_contributed} coins</p>
                               <div className="mt-1 text-sm">
                                 {hasValidPrice ? (
-                                  <span className="text-emerald-600 font-medium">${price.toFixed(2)}</span>
+                                  <div>
+                                    <span className="text-emerald-600 font-medium">${price.toFixed(2)}</span>
+                                    {gradingCost > 0 && (
+                                      <span className="text-slate-500 text-xs ml-1">+ ${gradingCost.toFixed(2)} grading</span>
+                                    )}
+                                  </div>
                                 ) : (
                                   <span className="text-amber-600">No price set</span>
                                 )}
@@ -1206,43 +1245,80 @@ export default function Batches() {
       {/* Edit Prices Modal */}
       {showPricesModal && batchDetails && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4">
             <div className="flex items-center justify-between px-6 py-4 border-b">
-              <h2 className="text-lg font-semibold">Edit Cost per Coin</h2>
+              <h2 className="text-lg font-semibold">Edit Costs per Coin</h2>
               <button onClick={() => setShowPricesModal(false)} className="p-2 hover:bg-slate-100 rounded-lg">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="p-6 space-y-4 max-h-96 overflow-y-auto">
+            <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto">
               {batchDetails.coins?.map(coin => {
                 const key = String(coin.coin_type_id)
+                const isUngraded = coin.is_ungraded
                 return (
-                  <div key={coin.id} className="flex items-center justify-between gap-4">
-                    <div>
-                      <p className="font-medium">{coin.coin_type_name}</p>
-                      <p className="text-xs text-slate-500">{coin.total_contributed} coins</p>
+                  <div key={coin.id} className="border rounded-lg p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <div>
+                        <p className="font-medium">{coin.coin_type_name}</p>
+                        <p className="text-xs text-slate-500">{coin.total_contributed} coins</p>
+                      </div>
+                      {isUngraded && (
+                        <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded">Ungraded</span>
+                      )}
                     </div>
-                    <div className="w-32">
-                      <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          pattern="[0-9]*\.?[0-9]*"
-                          className="input pl-7 text-right"
-                          placeholder="—"
-                          value={typeof coinPrices[key] === 'object' ? '' : (coinPrices[key] || '')}
-                          onChange={(e) => {
-                            // Only allow numbers and decimal
-                            const val = e.target.value.replace(/[^0-9.]/g, '')
-                            setCoinPrices({
-                              ...coinPrices,
-                              [key]: val
-                            })
-                          }}
-                        />
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">Coin Cost</label>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            pattern="[0-9]*\.?[0-9]*"
+                            className="input pl-7 text-right"
+                            placeholder="—"
+                            value={typeof coinPrices[key] === 'object' ? '' : (coinPrices[key] || '')}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/[^0-9.]/g, '')
+                              setCoinPrices({
+                                ...coinPrices,
+                                [key]: val
+                              })
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">
+                          Grading Cost {isUngraded && <span className="text-slate-400">(N/A)</span>}
+                        </label>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            pattern="[0-9]*\.?[0-9]*"
+                            className={`input pl-7 text-right ${isUngraded ? 'bg-slate-100 text-slate-400' : ''}`}
+                            placeholder={isUngraded ? '0' : '—'}
+                            disabled={isUngraded}
+                            value={isUngraded ? '0' : (gradingCosts[key] || '')}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/[^0-9.]/g, '')
+                              setGradingCosts({
+                                ...gradingCosts,
+                                [key]: val
+                              })
+                            }}
+                          />
+                        </div>
                       </div>
                     </div>
+                    {(coinPrices[key] || gradingCosts[key]) && (
+                      <div className="mt-2 pt-2 border-t text-xs text-slate-500">
+                        Total cost: ${((parseFloat(coinPrices[key]) || 0) + (parseFloat(gradingCosts[key]) || 0)).toFixed(2)}/coin
+                      </div>
+                    )}
                   </div>
                 )
               })}
@@ -1252,7 +1328,7 @@ export default function Batches() {
                 Cancel
               </button>
               <button onClick={handleSavePrices} className="btn btn-primary flex-1">
-                Save Prices
+                Save Costs
               </button>
             </div>
           </div>

@@ -32,7 +32,7 @@ CREATE TABLE users (
 CREATE TABLE coin_types (
     coin_type_id SERIAL PRIMARY KEY,
     name VARCHAR(100) UNIQUE NOT NULL,
-    short_code VARCHAR(20),
+    short_code VARCHAR(50),
     catalog_id VARCHAR(50),
     is_ungraded BOOLEAN DEFAULT false,
     description TEXT,
@@ -60,6 +60,7 @@ CREATE TABLE batch_coins (
     batch_id INTEGER REFERENCES batches(batch_id) ON DELETE CASCADE,
     coin_type_id INTEGER REFERENCES coin_types(coin_type_id),
     cost_per_coin DECIMAL(10, 2),
+    grading_cost_per_coin DECIMAL(10, 2) DEFAULT 0,
     total_contributed INTEGER DEFAULT 0,
     total_sold INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

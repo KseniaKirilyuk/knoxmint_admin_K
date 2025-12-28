@@ -238,9 +238,9 @@ export default async function handler(req, res) {
       for (const [itemTitle, coinTypeId] of Object.entries(mappings)) {
         if (!coinTypeId) continue;
         
-        // Get cost_per_coin for this coin type from batch_coins
+        // Get cost_per_coin and grading_cost_per_coin for this coin type from batch_coins
         const batchCoin = await query(`
-          SELECT bc.batch_id, bc.cost_per_coin
+          SELECT bc.batch_id, bc.cost_per_coin, bc.grading_cost_per_coin
           FROM batch_coins bc
           JOIN batches b ON bc.batch_id = b.batch_id
           WHERE bc.coin_type_id = $1 
@@ -249,7 +249,10 @@ export default async function handler(req, res) {
           LIMIT 1
         `, [coinTypeId]);
         
-        const coinCost = batchCoin.rows.length > 0 ? parseFloat(batchCoin.rows[0].cost_per_coin) || 0 : 0;
+        // Total cost = coin cost + grading cost
+        const baseCost = batchCoin.rows.length > 0 ? parseFloat(batchCoin.rows[0].cost_per_coin) || 0 : 0;
+        const gradingCost = batchCoin.rows.length > 0 ? parseFloat(batchCoin.rows[0].grading_cost_per_coin) || 0 : 0;
+        const coinCost = baseCost + gradingCost;
         const batchId = batchCoin.rows.length > 0 ? batchCoin.rows[0].batch_id : null;
         
         // Update all sales with this title
