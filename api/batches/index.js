@@ -314,6 +314,87 @@ export default async function handler(req, res) {
         return res.json({ success: true, results });
       }
 
+      // Cleanup: Merge ungraded contributions back into graded (fixes old split data)
+      if (action === 'cleanupUngradedContributions') {
+        await ensureCoinTypeColumns();
+        const { batchId } = req.body;
+        
+        if (!batchId) {
+          return res.status(400).json({ error: 'Batch ID required' });
+        }
+
+        // Find all ungraded contributions in this batch
+        const ungradedContribs = await query(`
+          SELECT uc.id, uc.user_id, uc.quantity, uc.coin_type_id, ct.catalog_id, ct.name
+          FROM user_contributions uc
+          JOIN coin_types ct ON uc.coin_type_id = ct.coin_type_id
+          WHERE uc.batch_id = $1 AND ct.is_ungraded = true
+        `, [batchId]);
+
+        if (ungradedContribs.rows.length === 0) {
+          return res.json({ success: true, message: 'No ungraded contributions to clean up', merged: 0 });
+        }
+
+        let mergedCount = 0;
+
+        for (const contrib of ungradedContribs.rows) {
+          // Find the graded variant with same catalog_id
+          const gradedCoinType = await query(`
+            SELECT coin_type_id FROM coin_types 
+            WHERE catalog_id = $1 AND (is_ungraded = false OR is_ungraded IS NULL)
+            LIMIT 1
+          `, [contrib.catalog_id]);
+
+          if (gradedCoinType.rows.length === 0) {
+            console.log(`No graded variant found for catalog_id ${contrib.catalog_id}, skipping`);
+            continue;
+          }
+
+          const gradedCoinTypeId = gradedCoinType.rows[0].coin_type_id;
+
+          // Check if user already has a graded contribution
+          const existingGraded = await query(`
+            SELECT id, quantity FROM user_contributions 
+            WHERE batch_id = $1 AND user_id = $2 AND coin_type_id = $3
+          `, [batchId, contrib.user_id, gradedCoinTypeId]);
+
+          if (existingGraded.rows.length > 0) {
+            // Add to existing graded contribution
+            await query(
+              'UPDATE user_contributions SET quantity = quantity + $1 WHERE id = $2',
+              [contrib.quantity, existingGraded.rows[0].id]
+            );
+          } else {
+            // Create new graded contribution
+            await query(
+              'INSERT INTO user_contributions (user_id, batch_id, coin_type_id, quantity) VALUES ($1, $2, $3, $4)',
+              [contrib.user_id, batchId, gradedCoinTypeId, contrib.quantity]
+            );
+          }
+
+          // Delete the ungraded contribution
+          await query('DELETE FROM user_contributions WHERE id = $1', [contrib.id]);
+          mergedCount++;
+        }
+
+        // Update batch_coins totals
+        await query(`
+          UPDATE batch_coins bc
+          SET total_contributed = (
+            SELECT COALESCE(SUM(uc.quantity), 0) 
+            FROM user_contributions uc 
+            WHERE uc.batch_id = bc.batch_id AND uc.coin_type_id = bc.coin_type_id
+          )
+          WHERE bc.batch_id = $1
+        `, [batchId]);
+
+        return res.json({ 
+          success: true, 
+          message: `Merged ${mergedCount} ungraded contributions back to graded`,
+          merged: mergedCount
+        });
+      }
+
       // Bulk import multiple batches
       if (action === 'bulkImport') {
         const { batches, coinCodeMappings, newCoinTypes } = req.body;

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, Upload as UploadIcon, Calendar, Package, Users, X, Edit2, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, CheckCircle, AlertCircle, DollarSign, Check, Scissors } from 'lucide-react'
+import { Plus, Upload as UploadIcon, Calendar, Package, Users, X, Edit2, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, CheckCircle, AlertCircle, DollarSign, Check, Scissors, RefreshCw } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import api from '../lib/api'
 
@@ -965,6 +965,25 @@ export default function Batches() {
                     >
                       <Scissors className="w-4 h-4" /> Grading Results
                     </button>
+                    {/* Show cleanup button if there are ungraded contributions (from old split logic) */}
+                    {batchDetails.contributions?.some(c => c.is_ungraded) && (
+                      <button 
+                        onClick={async () => {
+                          if (!confirm('This will merge ungraded contribution entries back into the main coin type. Continue?')) return;
+                          try {
+                            const res = await api.post('/batches?action=cleanupUngradedContributions', { batchId: batch.batch_id });
+                            alert(res.data.message);
+                            fetchBatchDetails(batch.batch_id);
+                          } catch (err) {
+                            alert('Error cleaning up: ' + (err.response?.data?.error || err.message));
+                          }
+                        }}
+                        className="btn btn-secondary btn-sm gap-1 text-amber-600 hover:bg-amber-50"
+                        title="Merge ungraded contribution entries back into graded (fixes old data)"
+                      >
+                        <RefreshCw className="w-4 h-4" /> Fix Split Data
+                      </button>
+                    )}
                     <button onClick={() => openEditModal(batch)} className="btn btn-secondary btn-sm gap-1">
                       <Edit2 className="w-4 h-4" /> Edit Batch
                     </button>
