@@ -1,4 +1,4 @@
-import { query } from '../_lib/db.js';
+import { query, getClient } from '../_lib/db.js';
 import jwt from 'jsonwebtoken';
 
 function verifyToken(req) {
@@ -197,10 +197,12 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: 'No coins marked as ungraded' });
         }
 
-        // Use a transaction to ensure all-or-nothing
-        await query('BEGIN');
+        // Get a dedicated client for transaction
+        const client = await getClient();
         
         try {
+          await client.query('BEGIN');
+
           for (const split of validSplits) {
             const { coinTypeId, catalogId, graded, ungraded } = split;
             
@@ -208,7 +210,7 @@ export default async function handler(req, res) {
             if (totalCoins === 0) continue;
 
             // Get base coin info for creating ungraded variant
-            const baseCoinInfo = await query(
+            const baseCoinInfo = await client.query(
               'SELECT name, short_code, catalog_id FROM coin_types WHERE coin_type_id = $1', 
               [coinTypeId]
             );
@@ -223,7 +225,7 @@ export default async function handler(req, res) {
 
             // Find or create the ungraded variant
             let ungradedCoinTypeId;
-            const ungradedCoin = await query(
+            const ungradedCoin = await client.query(
               `SELECT coin_type_id FROM coin_types 
                WHERE (catalog_id = $1 AND is_ungraded = true) 
                   OR (short_code = $2 AND is_ungraded = true) LIMIT 1`,
@@ -235,7 +237,7 @@ export default async function handler(req, res) {
               const ungradedName = `${baseName} (Ungraded)`;
               
               // Check if name already exists
-              const existingName = await query(
+              const existingName = await client.query(
                 'SELECT coin_type_id FROM coin_types WHERE name = $1',
                 [ungradedName]
               );
@@ -243,12 +245,12 @@ export default async function handler(req, res) {
               if (existingName.rows.length > 0) {
                 ungradedCoinTypeId = existingName.rows[0].coin_type_id;
                 // Update it to be marked as ungraded
-                await query(
+                await client.query(
                   'UPDATE coin_types SET is_ungraded = true, catalog_id = $1 WHERE coin_type_id = $2',
                   [baseCatalogId, ungradedCoinTypeId]
                 );
               } else {
-                const newUngraded = await query(
+                const newUngraded = await client.query(
                   `INSERT INTO coin_types (name, short_code, catalog_id, is_ungraded, keywords)
                    VALUES ($1, $2, $3, true, $4)
                    RETURNING coin_type_id`,
@@ -261,7 +263,7 @@ export default async function handler(req, res) {
             }
 
             // Get all contributions for this batch and base coin type
-            const contributions = await query(
+            const contributions = await client.query(
               `SELECT id, user_id, quantity FROM user_contributions 
                WHERE batch_id = $1 AND coin_type_id = $2`,
               [batchId, coinTypeId]
@@ -282,17 +284,17 @@ export default async function handler(req, res) {
 
               // Update or delete graded contribution
               if (gradedQty > 0) {
-                await query(
+                await client.query(
                   `UPDATE user_contributions SET quantity = $1 WHERE id = $2`,
                   [gradedQty, contrib.id]
                 );
               } else {
-                await query('DELETE FROM user_contributions WHERE id = $1', [contrib.id]);
+                await client.query('DELETE FROM user_contributions WHERE id = $1', [contrib.id]);
               }
 
               // Insert ungraded contribution
               if (ungradedQty > 0) {
-                await query(
+                await client.query(
                   `INSERT INTO user_contributions (user_id, batch_id, coin_type_id, quantity)
                    VALUES ($1, $2, $3, $4)
                    ON CONFLICT (user_id, batch_id, coin_type_id)
@@ -303,7 +305,7 @@ export default async function handler(req, res) {
             }
 
             // Update batch_coins totals for graded
-            await query(`
+            await client.query(`
               INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed)
               SELECT $1, $2, COALESCE(SUM(quantity), 0) 
               FROM user_contributions WHERE batch_id = $1 AND coin_type_id = $2
@@ -315,7 +317,7 @@ export default async function handler(req, res) {
             `, [batchId, coinTypeId]);
 
             // Update batch_coins totals for ungraded
-            await query(`
+            await client.query(`
               INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed)
               SELECT $1, $2, COALESCE(SUM(quantity), 0) 
               FROM user_contributions WHERE batch_id = $1 AND coin_type_id = $2
@@ -327,12 +329,14 @@ export default async function handler(req, res) {
             `, [batchId, ungradedCoinTypeId]);
           }
 
-          await query('COMMIT');
+          await client.query('COMMIT');
           return res.json({ success: true });
         } catch (splitError) {
-          await query('ROLLBACK');
+          await client.query('ROLLBACK');
           console.error('Split grading error:', splitError);
           return res.status(500).json({ error: 'Server error: ' + splitError.message });
+        } finally {
+          client.release();
         }
       }
 

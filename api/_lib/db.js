@@ -10,4 +10,10 @@ export async function query(text, params = []) {
   return result;
 }
 
+// Get a client for transactions (must release when done!)
+export async function getClient() {
+  const client = await pool.connect();
+  return client;
+}
+
 export { pool };
