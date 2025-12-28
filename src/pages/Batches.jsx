@@ -455,17 +455,29 @@ export default function Batches() {
   }
 
   // Split grading results functions
-  const openSplitModal = (batchId, batchCoins) => {
+  const openSplitModal = (batchId, batchCoins, contributions) => {
     setSplitBatchId(batchId)
-    // Initialize split data from batch coins (only graded variants, not already-ungraded)
+    
+    // Group contributions by coin type to get actual totals
+    const contribTotals = {}
+    if (contributions && contributions.length > 0) {
+      contributions.forEach(c => {
+        if (!contribTotals[c.coin_type_id]) {
+          contribTotals[c.coin_type_id] = 0
+        }
+        contribTotals[c.coin_type_id] += c.quantity
+      })
+    }
+    
+    // Initialize split data from batch coins that have actual contributions
     const data = batchCoins
-      .filter(bc => !bc.is_ungraded && bc.total_contributed > 0)
+      .filter(bc => !bc.is_ungraded && contribTotals[bc.coin_type_id] > 0)
       .map(bc => ({
         catalogId: bc.catalog_id || bc.short_code,
         coinTypeId: bc.coin_type_id,
         coinName: bc.coin_type_name,
-        total: bc.total_contributed,
-        graded: bc.total_contributed,
+        total: contribTotals[bc.coin_type_id] || 0,
+        graded: contribTotals[bc.coin_type_id] || 0,
         ungraded: 0
       }))
     setSplitData(data)
@@ -507,10 +519,22 @@ export default function Batches() {
         return
       }
       
-      await api.post('/batches?action=splitGradingResults', {
+      console.log('Sending split request:', { batchId: splitBatchId, splits })
+      
+      const response = await api.post('/batches?action=splitGradingResults', {
         batchId: splitBatchId,
         splits
       })
+      
+      console.log('Split response:', response.data)
+      
+      // Show results
+      if (response.data.results) {
+        const summary = response.data.results.map(r => 
+          r.error ? `${r.coinTypeId}: ${r.error}` : `Split ${r.contributionsSplit} contributions: ${r.totalGraded} graded, ${r.totalUngraded} ungraded`
+        ).join('\n')
+        alert('Split complete!\n\n' + summary)
+      }
       
       setShowSplitModal(false)
       setSplitData([])
@@ -881,10 +905,10 @@ export default function Batches() {
                       <UploadIcon className="w-4 h-4" /> Upload Contributions
                     </button>
                     <button 
-                      onClick={() => openSplitModal(batch.batch_id, batchDetails.coins || [])} 
+                      onClick={() => openSplitModal(batch.batch_id, batchDetails.coins || [], batchDetails.contributions || [])} 
                       className="btn btn-secondary btn-sm gap-1"
-                      disabled={!batchDetails.coins?.some(c => !c.is_ungraded && c.total_contributed > 0)}
-                      title="Split contributions into graded and ungraded"
+                      disabled={!batchDetails.contributions?.length || !batchDetails.contributions.some(c => !c.is_ungraded)}
+                      title={!batchDetails.contributions?.length ? "Upload contributions first" : "Split contributions into graded and ungraded"}
                     >
                       <Scissors className="w-4 h-4" /> Split Grading Results
                     </button>
@@ -1802,7 +1826,10 @@ export default function Batches() {
             
             <div className="flex-1 overflow-y-auto p-6 space-y-4">
               {splitData.length === 0 ? (
-                <p className="text-center text-slate-500 py-8">No coin types to split</p>
+                <div className="text-center py-8">
+                  <p className="text-slate-500 mb-2">No contributions available to split</p>
+                  <p className="text-sm text-slate-400">Upload contributions first, then use this feature to split them into graded and ungraded pools.</p>
+                </div>
               ) : (
                 splitData.map((item, index) => (
                   <div key={item.catalogId} className="border rounded-lg p-4">

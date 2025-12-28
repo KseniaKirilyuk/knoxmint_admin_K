@@ -1,4 +1,4 @@
-import { query, getClient } from '../_lib/db.js';
+import { query } from '../_lib/db.js';
 import jwt from 'jsonwebtoken';
 
 function verifyToken(req) {
@@ -197,147 +197,164 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: 'No coins marked as ungraded' });
         }
 
-        // Get a dedicated client for transaction
-        const client = await getClient();
-        
-        try {
-          await client.query('BEGIN');
+        const results = [];
 
-          for (const split of validSplits) {
-            const { coinTypeId, catalogId, graded, ungraded } = split;
+        for (const split of validSplits) {
+          const { coinTypeId, catalogId, graded, ungraded } = split;
+          
+          const totalCoins = (graded || 0) + (ungraded || 0);
+          if (totalCoins === 0) continue;
+
+          // Get base coin info for creating ungraded variant
+          const baseCoinInfo = await query(
+            'SELECT name, short_code, catalog_id FROM coin_types WHERE coin_type_id = $1', 
+            [coinTypeId]
+          );
+          
+          if (baseCoinInfo.rows.length === 0) {
+            results.push({ coinTypeId, error: 'Coin type not found' });
+            continue;
+          }
+          
+          const baseName = baseCoinInfo.rows[0].name.replace(' (Ungraded)', '');
+          const baseCode = baseCoinInfo.rows[0].short_code?.replace('-UNGRADED', '') || catalogId || String(coinTypeId);
+          const baseCatalogId = baseCoinInfo.rows[0].catalog_id || catalogId || baseCode;
+
+          // Find or create the ungraded variant
+          let ungradedCoinTypeId;
+          const ungradedCoin = await query(
+            `SELECT coin_type_id FROM coin_types 
+             WHERE (catalog_id = $1 AND is_ungraded = true) 
+                OR (short_code = $2 AND is_ungraded = true) LIMIT 1`,
+            [baseCatalogId, `${baseCode}-UNGRADED`]
+          );
+          
+          if (ungradedCoin.rows.length === 0) {
+            // Create ungraded variant with unique name
+            const ungradedName = `${baseName} (Ungraded)`;
             
-            const totalCoins = (graded || 0) + (ungraded || 0);
-            if (totalCoins === 0) continue;
-
-            // Get base coin info for creating ungraded variant
-            const baseCoinInfo = await client.query(
-              'SELECT name, short_code, catalog_id FROM coin_types WHERE coin_type_id = $1', 
-              [coinTypeId]
+            // Check if name already exists
+            const existingName = await query(
+              'SELECT coin_type_id FROM coin_types WHERE name = $1',
+              [ungradedName]
             );
             
-            if (baseCoinInfo.rows.length === 0) {
-              throw new Error(`Coin type ${coinTypeId} not found`);
-            }
-            
-            const baseName = baseCoinInfo.rows[0].name.replace(' (Ungraded)', '');
-            const baseCode = baseCoinInfo.rows[0].short_code?.replace('-UNGRADED', '') || catalogId || String(coinTypeId);
-            const baseCatalogId = baseCoinInfo.rows[0].catalog_id || catalogId || baseCode;
-
-            // Find or create the ungraded variant
-            let ungradedCoinTypeId;
-            const ungradedCoin = await client.query(
-              `SELECT coin_type_id FROM coin_types 
-               WHERE (catalog_id = $1 AND is_ungraded = true) 
-                  OR (short_code = $2 AND is_ungraded = true) LIMIT 1`,
-              [baseCatalogId, `${baseCode}-UNGRADED`]
-            );
-            
-            if (ungradedCoin.rows.length === 0) {
-              // Create ungraded variant with unique name
-              const ungradedName = `${baseName} (Ungraded)`;
-              
-              // Check if name already exists
-              const existingName = await client.query(
-                'SELECT coin_type_id FROM coin_types WHERE name = $1',
-                [ungradedName]
+            if (existingName.rows.length > 0) {
+              ungradedCoinTypeId = existingName.rows[0].coin_type_id;
+              // Update it to be marked as ungraded
+              await query(
+                'UPDATE coin_types SET is_ungraded = true, catalog_id = $1 WHERE coin_type_id = $2',
+                [baseCatalogId, ungradedCoinTypeId]
               );
-              
-              if (existingName.rows.length > 0) {
-                ungradedCoinTypeId = existingName.rows[0].coin_type_id;
-                // Update it to be marked as ungraded
-                await client.query(
-                  'UPDATE coin_types SET is_ungraded = true, catalog_id = $1 WHERE coin_type_id = $2',
-                  [baseCatalogId, ungradedCoinTypeId]
-                );
-              } else {
-                const newUngraded = await client.query(
-                  `INSERT INTO coin_types (name, short_code, catalog_id, is_ungraded, keywords)
-                   VALUES ($1, $2, $3, true, $4)
-                   RETURNING coin_type_id`,
-                  [ungradedName, `${baseCode}-UNGRADED`, baseCatalogId, [baseName, baseCatalogId]]
-                );
-                ungradedCoinTypeId = newUngraded.rows[0].coin_type_id;
-              }
             } else {
-              ungradedCoinTypeId = ungradedCoin.rows[0].coin_type_id;
+              const newUngraded = await query(
+                `INSERT INTO coin_types (name, short_code, catalog_id, is_ungraded, keywords)
+                 VALUES ($1, $2, $3, true, $4)
+                 RETURNING coin_type_id`,
+                [ungradedName, `${baseCode}-UNGRADED`, baseCatalogId, [baseName, baseCatalogId]]
+              );
+              ungradedCoinTypeId = newUngraded.rows[0].coin_type_id;
             }
-
-            // Get all contributions for this batch and base coin type
-            const contributions = await client.query(
-              `SELECT id, user_id, quantity FROM user_contributions 
-               WHERE batch_id = $1 AND coin_type_id = $2`,
-              [batchId, coinTypeId]
-            );
-
-            if (contributions.rows.length === 0) {
-              console.log(`No contributions found for batch ${batchId}, coin type ${coinTypeId}`);
-              continue;
-            }
-
-            const gradedRatio = graded / totalCoins;
-
-            // Split each contribution
-            for (const contrib of contributions.rows) {
-              const originalQty = contrib.quantity;
-              const gradedQty = Math.round(originalQty * gradedRatio);
-              const ungradedQty = originalQty - gradedQty;
-
-              // Update or delete graded contribution
-              if (gradedQty > 0) {
-                await client.query(
-                  `UPDATE user_contributions SET quantity = $1 WHERE id = $2`,
-                  [gradedQty, contrib.id]
-                );
-              } else {
-                await client.query('DELETE FROM user_contributions WHERE id = $1', [contrib.id]);
-              }
-
-              // Insert ungraded contribution
-              if (ungradedQty > 0) {
-                await client.query(
-                  `INSERT INTO user_contributions (user_id, batch_id, coin_type_id, quantity)
-                   VALUES ($1, $2, $3, $4)
-                   ON CONFLICT (user_id, batch_id, coin_type_id)
-                   DO UPDATE SET quantity = EXCLUDED.quantity`,
-                  [contrib.user_id, batchId, ungradedCoinTypeId, ungradedQty]
-                );
-              }
-            }
-
-            // Update batch_coins totals for graded
-            await client.query(`
-              INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed)
-              SELECT $1, $2, COALESCE(SUM(quantity), 0) 
-              FROM user_contributions WHERE batch_id = $1 AND coin_type_id = $2
-              ON CONFLICT (batch_id, coin_type_id)
-              DO UPDATE SET total_contributed = (
-                SELECT COALESCE(SUM(quantity), 0) FROM user_contributions 
-                WHERE batch_id = $1 AND coin_type_id = $2
-              )
-            `, [batchId, coinTypeId]);
-
-            // Update batch_coins totals for ungraded
-            await client.query(`
-              INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed)
-              SELECT $1, $2, COALESCE(SUM(quantity), 0) 
-              FROM user_contributions WHERE batch_id = $1 AND coin_type_id = $2
-              ON CONFLICT (batch_id, coin_type_id)
-              DO UPDATE SET total_contributed = (
-                SELECT COALESCE(SUM(quantity), 0) FROM user_contributions 
-                WHERE batch_id = $1 AND coin_type_id = $2
-              )
-            `, [batchId, ungradedCoinTypeId]);
+          } else {
+            ungradedCoinTypeId = ungradedCoin.rows[0].coin_type_id;
           }
 
-          await client.query('COMMIT');
-          return res.json({ success: true });
-        } catch (splitError) {
-          await client.query('ROLLBACK');
-          console.error('Split grading error:', splitError);
-          return res.status(500).json({ error: 'Server error: ' + splitError.message });
-        } finally {
-          client.release();
+          // Get all contributions for this batch and base coin type
+          const contributions = await query(
+            `SELECT id, user_id, quantity FROM user_contributions 
+             WHERE batch_id = $1 AND coin_type_id = $2`,
+            [batchId, coinTypeId]
+          );
+
+          if (contributions.rows.length === 0) {
+            results.push({ coinTypeId, error: 'No contributions found', ungradedCoinTypeId });
+            continue;
+          }
+
+          let totalGraded = 0;
+          let totalUngraded = 0;
+
+          // Use cumulative rounding to properly distribute coins
+          // This ensures the total split matches the requested amounts
+          let cumulativeIdealUngraded = 0;
+          let cumulativeActualUngraded = 0;
+
+          // Split each contribution
+          for (const contrib of contributions.rows) {
+            const originalQty = contrib.quantity;
+            
+            // Calculate cumulative ideal ungraded up to this point
+            cumulativeIdealUngraded += (originalQty / totalCoins) * ungraded;
+            
+            // This person's ungraded = round(cumulative ideal) - what we've already assigned
+            let ungradedQty = Math.round(cumulativeIdealUngraded) - cumulativeActualUngraded;
+            
+            // Ensure we don't exceed original quantity
+            ungradedQty = Math.min(ungradedQty, originalQty);
+            ungradedQty = Math.max(ungradedQty, 0);
+            
+            const gradedQty = originalQty - ungradedQty;
+            
+            cumulativeActualUngraded += ungradedQty;
+
+            // Update or delete graded contribution
+            if (gradedQty > 0) {
+              await query(
+                `UPDATE user_contributions SET quantity = $1 WHERE id = $2`,
+                [gradedQty, contrib.id]
+              );
+              totalGraded += gradedQty;
+            } else {
+              await query('DELETE FROM user_contributions WHERE id = $1', [contrib.id]);
+            }
+
+            // Insert ungraded contribution
+            if (ungradedQty > 0) {
+              await query(
+                `INSERT INTO user_contributions (user_id, batch_id, coin_type_id, quantity)
+                 VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (user_id, batch_id, coin_type_id)
+                 DO UPDATE SET quantity = EXCLUDED.quantity`,
+                [contrib.user_id, batchId, ungradedCoinTypeId, ungradedQty]
+              );
+              totalUngraded += ungradedQty;
+            }
+          }
+
+          // Update batch_coins totals for graded
+          await query(`
+            INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed)
+            SELECT $1, $2, COALESCE(SUM(quantity), 0) 
+            FROM user_contributions WHERE batch_id = $1 AND coin_type_id = $2
+            ON CONFLICT (batch_id, coin_type_id)
+            DO UPDATE SET total_contributed = (
+              SELECT COALESCE(SUM(quantity), 0) FROM user_contributions 
+              WHERE batch_id = $1 AND coin_type_id = $2
+            )
+          `, [batchId, coinTypeId]);
+
+          // Update batch_coins totals for ungraded
+          await query(`
+            INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed)
+            SELECT $1, $2, COALESCE(SUM(quantity), 0) 
+            FROM user_contributions WHERE batch_id = $1 AND coin_type_id = $2
+            ON CONFLICT (batch_id, coin_type_id)
+            DO UPDATE SET total_contributed = (
+              SELECT COALESCE(SUM(quantity), 0) FROM user_contributions 
+              WHERE batch_id = $1 AND coin_type_id = $2
+            )
+          `, [batchId, ungradedCoinTypeId]);
+
+          results.push({ 
+            coinTypeId, 
+            ungradedCoinTypeId, 
+            totalGraded, 
+            totalUngraded,
+            contributionsSplit: contributions.rows.length 
+          });
         }
+
+        return res.json({ success: true, results });
       }
 
       // Bulk import multiple batches
