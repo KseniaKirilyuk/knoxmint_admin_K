@@ -27,6 +27,11 @@ export default function Settings() {
   const [uploading, setUploading] = useState(false)
   const [dragActive, setDragActive] = useState(false)
   const [uploadError, setUploadError] = useState('')
+  
+  // Merge state
+  const [showMergeModal, setShowMergeModal] = useState(false)
+  const [mergingCoin, setMergingCoin] = useState(null)
+  const [mergeTargetId, setMergeTargetId] = useState('')
 
   useEffect(() => {
     if (activeTab === 'coins') {
@@ -104,7 +109,37 @@ export default function Settings() {
       await api.post('/batches', { action: 'deleteCoinType', coinTypeId })
       fetchCoinTypes()
     } catch (error) {
-      alert(error.response?.data?.error || 'Error deleting coin type')
+      const errorMsg = error.response?.data?.error || 'Error deleting coin type'
+      if (errorMsg.includes('contributions') || errorMsg.includes('transactions')) {
+        // Offer to merge instead
+        if (confirm(`${errorMsg}\n\nWould you like to merge this coin type into another one instead?`)) {
+          setMergingCoin({ id: coinTypeId, name: coinName })
+          setMergeTargetId('')
+          setShowMergeModal(true)
+        }
+      } else {
+        alert(errorMsg)
+      }
+    }
+  }
+
+  const handleMerge = async () => {
+    if (!mergeTargetId) {
+      alert('Please select a target coin type')
+      return
+    }
+    
+    try {
+      const res = await api.post('/batches?action=mergeCoinTypes', {
+        sourceId: mergingCoin.id,
+        targetId: parseInt(mergeTargetId)
+      })
+      alert(res.data.message)
+      setShowMergeModal(false)
+      setMergingCoin(null)
+      fetchCoinTypes()
+    } catch (error) {
+      alert(error.response?.data?.error || 'Error merging coin types')
     }
   }
 
@@ -797,6 +832,58 @@ export default function Settings() {
                   </button>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Merge Coin Types Modal */}
+      {showMergeModal && mergingCoin && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4">
+            <div className="px-6 py-4 border-b flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Merge Coin Type</h2>
+              <button onClick={() => setShowMergeModal(false)} className="p-2 hover:bg-slate-100 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-slate-600">
+                Merge <strong>"{mergingCoin.name}"</strong> into another coin type. All contributions and sales will be moved to the target.
+              </p>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Merge into:
+                </label>
+                <select
+                  className="input"
+                  value={mergeTargetId}
+                  onChange={(e) => setMergeTargetId(e.target.value)}
+                >
+                  <option value="">Select target coin type...</option>
+                  {coinTypes
+                    .filter(ct => ct.coin_type_id !== mergingCoin.id)
+                    .map(ct => (
+                      <option key={ct.coin_type_id} value={ct.coin_type_id}>
+                        {ct.name} {ct.is_ungraded ? '(Ungraded)' : ''}
+                      </option>
+                    ))
+                  }
+                </select>
+              </div>
+
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+                <strong>Warning:</strong> This action cannot be undone. The source coin type will be deleted after merging.
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t flex gap-3 justify-end">
+              <button onClick={() => setShowMergeModal(false)} className="btn btn-secondary">
+                Cancel
+              </button>
+              <button onClick={handleMerge} className="btn btn-primary" disabled={!mergeTargetId}>
+                Merge
+              </button>
             </div>
           </div>
         </div>

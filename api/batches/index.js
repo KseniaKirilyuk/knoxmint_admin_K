@@ -247,13 +247,24 @@ export default async function handler(req, res) {
                 [baseCatalogId, ungradedCoinTypeId]
               );
             } else {
-              const newUngraded = await query(
-                `INSERT INTO coin_types (name, short_code, catalog_id, is_ungraded, keywords)
-                 VALUES ($1, $2, $3, true, $4)
-                 RETURNING coin_type_id`,
-                [ungradedName, `${baseCode}-UNGRADED`, baseCatalogId, [baseName, baseCatalogId]]
-              );
-              ungradedCoinTypeId = newUngraded.rows[0].coin_type_id;
+              try {
+                const newUngraded = await query(
+                  `INSERT INTO coin_types (name, short_code, catalog_id, is_ungraded, keywords)
+                   VALUES ($1, $2, $3, true, $4)
+                   RETURNING coin_type_id`,
+                  [ungradedName, `${baseCode}-UNGRADED`, baseCatalogId, [baseName, baseCatalogId]]
+                );
+                ungradedCoinTypeId = newUngraded.rows[0].coin_type_id;
+              } catch (insertError) {
+                // If insert fails due to duplicate, try to find it
+                console.error('Insert failed, trying to find existing:', insertError.message);
+                const retry = await query('SELECT coin_type_id FROM coin_types WHERE name = $1 OR short_code = $2', [ungradedName, `${baseCode}-UNGRADED`]);
+                if (retry.rows.length > 0) {
+                  ungradedCoinTypeId = retry.rows[0].coin_type_id;
+                } else {
+                  throw new Error(`Failed to create ungraded coin type: ${insertError.message}`);
+                }
+              }
             }
           } else {
             ungradedCoinTypeId = ungradedCoin.rows[0].coin_type_id;
@@ -731,6 +742,105 @@ export default async function handler(req, res) {
       }
 
       // Delete coin type
+      // Merge coin types - move all contributions from source to target, then delete source
+      if (action === 'mergeCoinTypes') {
+        const { sourceId, targetId } = req.body;
+        if (!sourceId || !targetId) {
+          return res.status(400).json({ error: 'Source and target coin type IDs required' });
+        }
+        if (sourceId === targetId) {
+          return res.status(400).json({ error: 'Source and target must be different' });
+        }
+
+        // Get source and target info
+        const sourceInfo = await query('SELECT * FROM coin_types WHERE coin_type_id = $1', [sourceId]);
+        const targetInfo = await query('SELECT * FROM coin_types WHERE coin_type_id = $1', [targetId]);
+        
+        if (sourceInfo.rows.length === 0) {
+          return res.status(404).json({ error: 'Source coin type not found' });
+        }
+        if (targetInfo.rows.length === 0) {
+          return res.status(404).json({ error: 'Target coin type not found' });
+        }
+
+        // Move user_contributions - need to handle conflicts
+        // First, get all contributions from source
+        const sourceContribs = await query(
+          'SELECT * FROM user_contributions WHERE coin_type_id = $1',
+          [sourceId]
+        );
+
+        for (const contrib of sourceContribs.rows) {
+          // Check if target already has a contribution for this user+batch
+          const existing = await query(
+            'SELECT * FROM user_contributions WHERE user_id = $1 AND batch_id = $2 AND coin_type_id = $3',
+            [contrib.user_id, contrib.batch_id, targetId]
+          );
+
+          if (existing.rows.length > 0) {
+            // Add to existing
+            await query(
+              'UPDATE user_contributions SET quantity = quantity + $1 WHERE id = $2',
+              [contrib.quantity, existing.rows[0].id]
+            );
+          } else {
+            // Update to point to target
+            await query(
+              'UPDATE user_contributions SET coin_type_id = $1 WHERE id = $2',
+              [targetId, contrib.id]
+            );
+          }
+        }
+
+        // Delete any remaining source contributions (duplicates that were merged)
+        await query('DELETE FROM user_contributions WHERE coin_type_id = $1', [sourceId]);
+
+        // Update sales_transactions to point to target
+        await query(
+          'UPDATE sales_transactions SET coin_type_id = $1 WHERE coin_type_id = $2',
+          [targetId, sourceId]
+        );
+
+        // Update batch_coins - merge totals
+        const sourceBatchCoins = await query(
+          'SELECT * FROM batch_coins WHERE coin_type_id = $1',
+          [sourceId]
+        );
+
+        for (const bc of sourceBatchCoins.rows) {
+          const existing = await query(
+            'SELECT * FROM batch_coins WHERE batch_id = $1 AND coin_type_id = $2',
+            [bc.batch_id, targetId]
+          );
+
+          if (existing.rows.length > 0) {
+            // Add totals
+            await query(
+              'UPDATE batch_coins SET total_contributed = total_contributed + $1, total_sold = total_sold + $2 WHERE batch_id = $3 AND coin_type_id = $4',
+              [bc.total_contributed || 0, bc.total_sold || 0, bc.batch_id, targetId]
+            );
+          } else {
+            // Update to point to target
+            await query(
+              'UPDATE batch_coins SET coin_type_id = $1 WHERE batch_id = $2 AND coin_type_id = $3',
+              [targetId, bc.batch_id, sourceId]
+            );
+          }
+        }
+
+        // Delete remaining source batch_coins
+        await query('DELETE FROM batch_coins WHERE coin_type_id = $1', [sourceId]);
+
+        // Delete the source coin type
+        await query('DELETE FROM coin_types WHERE coin_type_id = $1', [sourceId]);
+
+        return res.json({ 
+          success: true, 
+          message: `Merged "${sourceInfo.rows[0].name}" into "${targetInfo.rows[0].name}"`,
+          contributionsMoved: sourceContribs.rows.length
+        });
+      }
+
       if (action === 'deleteCoinType') {
         const { coinTypeId } = req.body;
         if (!coinTypeId) return res.status(400).json({ error: 'Coin type ID required' });
