@@ -321,36 +321,38 @@ export default async function handler(req, res) {
             }
           }
 
-          // Update batch_coins totals for graded
+          // Update batch_coins totals for graded - use simple upsert
+          const gradedSum = await query(
+            'SELECT COALESCE(SUM(quantity), 0) as total FROM user_contributions WHERE batch_id = $1 AND coin_type_id = $2',
+            [batchId, coinTypeId]
+          );
           await query(`
             INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed)
-            SELECT $1, $2, COALESCE(SUM(quantity), 0) 
-            FROM user_contributions WHERE batch_id = $1 AND coin_type_id = $2
+            VALUES ($1, $2, $3)
             ON CONFLICT (batch_id, coin_type_id)
-            DO UPDATE SET total_contributed = (
-              SELECT COALESCE(SUM(quantity), 0) FROM user_contributions 
-              WHERE batch_id = $1 AND coin_type_id = $2
-            )
-          `, [batchId, coinTypeId]);
+            DO UPDATE SET total_contributed = $3
+          `, [batchId, coinTypeId, parseInt(gradedSum.rows[0].total)]);
 
-          // Update batch_coins totals for ungraded
+          // Update batch_coins totals for ungraded - use simple upsert
+          const ungradedSum = await query(
+            'SELECT COALESCE(SUM(quantity), 0) as total FROM user_contributions WHERE batch_id = $1 AND coin_type_id = $2',
+            [batchId, ungradedCoinTypeId]
+          );
           await query(`
             INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed)
-            SELECT $1, $2, COALESCE(SUM(quantity), 0) 
-            FROM user_contributions WHERE batch_id = $1 AND coin_type_id = $2
+            VALUES ($1, $2, $3)
             ON CONFLICT (batch_id, coin_type_id)
-            DO UPDATE SET total_contributed = (
-              SELECT COALESCE(SUM(quantity), 0) FROM user_contributions 
-              WHERE batch_id = $1 AND coin_type_id = $2
-            )
-          `, [batchId, ungradedCoinTypeId]);
+            DO UPDATE SET total_contributed = $3
+          `, [batchId, ungradedCoinTypeId, parseInt(ungradedSum.rows[0].total)]);
 
           results.push({ 
             coinTypeId, 
             ungradedCoinTypeId, 
             totalGraded, 
             totalUngraded,
-            contributionsSplit: contributions.rows.length 
+            contributionsSplit: contributions.rows.length,
+            batchCoinsGraded: parseInt(gradedSum.rows[0].total),
+            batchCoinsUngraded: parseInt(ungradedSum.rows[0].total)
           });
         }
 

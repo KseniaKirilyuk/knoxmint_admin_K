@@ -531,8 +531,10 @@ export default function Batches() {
       // Show results
       if (response.data.results) {
         const summary = response.data.results.map(r => 
-          r.error ? `${r.coinTypeId}: ${r.error}` : `Split ${r.contributionsSplit} contributions: ${r.totalGraded} graded, ${r.totalUngraded} ungraded`
-        ).join('\n')
+          r.error 
+            ? `Coin ${r.coinTypeId}: ${r.error}` 
+            : `Split ${r.contributionsSplit} contributions:\n  - Graded: ${r.totalGraded} (batch_coins: ${r.batchCoinsGraded})\n  - Ungraded: ${r.totalUngraded} (batch_coins: ${r.batchCoinsUngraded})\n  - Ungraded coin type ID: ${r.ungradedCoinTypeId}`
+        ).join('\n\n')
         alert('Split complete!\n\n' + summary)
       }
       
