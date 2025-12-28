@@ -1291,7 +1291,7 @@ export default function Batches() {
                       </div>
                       <div>
                         <label className="block text-xs text-slate-500 mb-1">
-                          Grading Cost {isUngraded && <span className="text-slate-400">(N/A)</span>}
+                          Grading Cost
                         </label>
                         <div className="relative">
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
@@ -1299,10 +1299,9 @@ export default function Batches() {
                             type="text"
                             inputMode="decimal"
                             pattern="[0-9]*\.?[0-9]*"
-                            className={`input pl-7 text-right ${isUngraded ? 'bg-slate-100 text-slate-400' : ''}`}
-                            placeholder={isUngraded ? '0' : '—'}
-                            disabled={isUngraded}
-                            value={isUngraded ? '0' : (gradingCosts[key] || '')}
+                            className="input pl-7 text-right"
+                            placeholder="—"
+                            value={gradingCosts[key] || ''}
                             onChange={(e) => {
                               const val = e.target.value.replace(/[^0-9.]/g, '')
                               setGradingCosts({
