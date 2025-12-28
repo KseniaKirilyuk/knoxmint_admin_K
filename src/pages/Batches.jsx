@@ -966,7 +966,7 @@ export default function Batches() {
                       <Scissors className="w-4 h-4" /> Grading Results
                     </button>
                     {/* Show cleanup button if there are ungraded contributions (from old split logic) */}
-                    {batchDetails.contributions?.some(c => c.is_ungraded) && (
+                    {batchDetails.contributions?.some(c => c.is_ungraded || c.coin_type_name?.includes('(Ungraded)')) && (
                       <button 
                         onClick={async () => {
                           if (!confirm('This will merge ungraded contribution entries back into the main coin type. Continue?')) return;

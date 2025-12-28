@@ -323,12 +323,12 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: 'Batch ID required' });
         }
 
-        // Find all ungraded contributions in this batch
+        // Find all ungraded contributions in this batch (check is_ungraded OR name)
         const ungradedContribs = await query(`
           SELECT uc.id, uc.user_id, uc.quantity, uc.coin_type_id, ct.catalog_id, ct.name
           FROM user_contributions uc
           JOIN coin_types ct ON uc.coin_type_id = ct.coin_type_id
-          WHERE uc.batch_id = $1 AND ct.is_ungraded = true
+          WHERE uc.batch_id = $1 AND (ct.is_ungraded = true OR ct.name LIKE '%(Ungraded)%')
         `, [batchId]);
 
         if (ungradedContribs.rows.length === 0) {
@@ -338,15 +338,20 @@ export default async function handler(req, res) {
         let mergedCount = 0;
 
         for (const contrib of ungradedContribs.rows) {
-          // Find the graded variant with same catalog_id
+          // Get base name by removing "(Ungraded)" suffix
+          const baseName = contrib.name.replace(' (Ungraded)', '').trim();
+          
+          // Find the graded variant with same catalog_id or same base name
           const gradedCoinType = await query(`
             SELECT coin_type_id FROM coin_types 
-            WHERE catalog_id = $1 AND (is_ungraded = false OR is_ungraded IS NULL)
+            WHERE (catalog_id = $1 OR name = $2) 
+              AND (is_ungraded = false OR is_ungraded IS NULL)
+              AND name NOT LIKE '%(Ungraded)%'
             LIMIT 1
-          `, [contrib.catalog_id]);
+          `, [contrib.catalog_id, baseName]);
 
           if (gradedCoinType.rows.length === 0) {
-            console.log(`No graded variant found for catalog_id ${contrib.catalog_id}, skipping`);
+            console.log(`No graded variant found for "${baseName}" (catalog_id: ${contrib.catalog_id}), skipping`);
             continue;
           }
 
