@@ -249,39 +249,34 @@ export default async function handler(req, res) {
           LIMIT 1
         `, [coinTypeId]);
         
-        // Total cost = coin cost + grading cost
-        const baseCost = batchCoin.rows.length > 0 ? parseFloat(batchCoin.rows[0].cost_per_coin) || 0 : 0;
+        // Get coin cost and grading cost separately
+        const coinCost = batchCoin.rows.length > 0 ? parseFloat(batchCoin.rows[0].cost_per_coin) || 0 : 0;
         const gradingCost = batchCoin.rows.length > 0 ? parseFloat(batchCoin.rows[0].grading_cost_per_coin) || 0 : 0;
-        const coinCost = baseCost + gradingCost;
+        const totalCostPerCoin = coinCost + gradingCost;
         const batchId = batchCoin.rows.length > 0 ? batchCoin.rows[0].batch_id : null;
         
         // Update all sales with this title
+        // Profit = Net - Grading cost - Coin cost
+        // Business share = max(33% × Profit, $8 per coin) - ALWAYS at least $8
+        // Member payout = Net - Grading cost - Business share
         const updateResult = await query(`
           UPDATE sales_transactions
           SET 
             coin_type_id = $1,
             batch_id = $2,
             coin_cost = $3 * quantity_sold,
-            profit = total_payout - ($3 * quantity_sold),
-            profit_share = CASE 
-              WHEN total_payout - ($3 * quantity_sold) > 0 
-              THEN GREATEST(0.33 * (total_payout - ($3 * quantity_sold)), 8)
-              ELSE 0 
-            END,
-            payout = CASE 
-              WHEN total_payout - ($3 * quantity_sold) > 0 
-              THEN (total_payout - ($3 * quantity_sold)) - GREATEST(0.33 * (total_payout - ($3 * quantity_sold)), 8)
-              ELSE 0 
-            END,
+            profit = total_payout - ($4 * quantity_sold) - ($5 * quantity_sold),
+            profit_share = GREATEST(0.33 * (total_payout - ($4 * quantity_sold) - ($5 * quantity_sold)), 8 * quantity_sold),
+            payout = total_payout - ($4 * quantity_sold) - GREATEST(0.33 * (total_payout - ($4 * quantity_sold) - ($5 * quantity_sold)), 8 * quantity_sold),
             profit_margin = CASE 
               WHEN sale_price > 0 
-              THEN (total_payout - ($3 * quantity_sold)) / sale_price
+              THEN (total_payout - ($4 * quantity_sold) - ($5 * quantity_sold)) / sale_price
               ELSE 0 
             END
-          WHERE item_title = $4
+          WHERE item_title = $6
             AND coin_type_id IS NULL
             AND COALESCE(is_refund, false) = false
-        `, [coinTypeId, batchId, coinCost, itemTitle]);
+        `, [coinTypeId, batchId, totalCostPerCoin, gradingCost, coinCost, itemTitle]);
         
         updated += updateResult.rowCount;
       }
@@ -321,23 +316,32 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Batch, coin type, date, and price are required' });
       }
 
-      // Get cost per coin from batch_coins
+      // Get cost per coin from batch_coins (separate coin cost and grading cost)
       const costResult = await query(`
-        SELECT COALESCE(cost_per_coin, 0) + COALESCE(grading_cost_per_coin, 0) as total_cost
+        SELECT 
+          COALESCE(cost_per_coin, 0) as coin_cost,
+          COALESCE(grading_cost_per_coin, 0) as grading_cost
         FROM batch_coins
         WHERE batch_id = $1 AND coin_type_id = $2
       `, [batchId, coinTypeId]);
 
-      const coinCost = costResult.rows.length > 0 ? parseFloat(costResult.rows[0].total_cost) : 0;
+      const coinCostPerUnit = costResult.rows.length > 0 ? parseFloat(costResult.rows[0].coin_cost) : 0;
+      const gradingCostPerUnit = costResult.rows.length > 0 ? parseFloat(costResult.rows[0].grading_cost) : 0;
       const qty = parseInt(quantitySold) || 1;
       
       // Calculate payout
+      // Net from sale = Sale price - eBay fee - Ads - Shipping
+      // Profit = Net - Grading cost - Coin cost
+      // Business share = max(33% × Profit, $8) - ALWAYS at least $8
+      // Contributor gets = Net - Grading cost - Business share
       const price = parseFloat(salePrice) || 0;
       const fees = (parseFloat(ebayFee) || 0) + (parseFloat(advertisingFee) || 0) + (parseFloat(shippingCost) || 0);
-      const totalPayout = price - fees;
-      const profit = totalPayout - (coinCost * qty);
-      const profitShare = profit > 0 ? Math.max(0.33 * profit, 8) : 0;
-      const memberPayout = profit > 0 ? profit - profitShare : profit;
+      const totalPayout = price - fees;  // Net from sale
+      const totalGradingCost = gradingCostPerUnit * qty;
+      const totalCoinCost = coinCostPerUnit * qty;
+      const profit = totalPayout - totalGradingCost - totalCoinCost;
+      const profitShare = Math.max(0.33 * profit, 8 * qty);  // Always at least $8 per coin
+      const memberPayout = totalPayout - totalGradingCost - profitShare;  // Net - grading - business share
       const margin = price > 0 ? (profit / price) : 0;
 
       const result = await query(`
@@ -359,7 +363,7 @@ export default async function handler(req, res) {
         qty,
         grade || null,
         totalPayout,
-        coinCost * qty,
+        totalCoinCost + totalGradingCost,  // Store combined cost for reference
         profit,
         profitShare,
         memberPayout,

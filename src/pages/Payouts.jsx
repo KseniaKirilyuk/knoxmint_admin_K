@@ -403,7 +403,7 @@ export default function Payouts() {
                                         <th className="px-4 py-2 text-right font-medium text-slate-600">Pool</th>
                                         <th className="px-4 py-2 text-right font-medium text-slate-600">Sold</th>
                                         <th className="px-4 py-2 text-right font-medium text-slate-600">Your %</th>
-                                        <th className="px-4 py-2 text-right font-medium text-slate-600">Total Profit</th>
+                                        <th className="px-4 py-2 text-right font-medium text-slate-600">Pool Profit</th>
                                         <th className="px-4 py-2 text-right font-medium text-slate-600">Your Payout</th>
                                       </tr>
                                     </thead>
@@ -411,14 +411,24 @@ export default function Payouts() {
                                       {breakdown.map((row, idx) => {
                                         const totalPayout = parseFloat(row.total_payout_all) || 0
                                         const userPayout = parseFloat(row.user_payout) || 0
-                                        const isLoss = totalPayout < 0
+                                        const isNegativeProfit = totalPayout < 0
                                         const noSales = parseInt(row.total_sold) === 0
+                                        const isUngraded = row.coin_type_name?.includes('(Ungraded)')
                                         return (
-                                        <tr key={idx} className={`border-t ${isLoss ? 'bg-red-50' : ''}`}>
+                                        <tr key={idx} className={`border-t ${isNegativeProfit ? 'bg-amber-50' : ''}`}>
                                           <td className="px-4 py-2">
-                                            <span className="font-medium text-slate-900">{row.coin_type_name}</span>
+                                            <div className="flex items-center gap-2">
+                                              <span className="font-medium text-slate-900">
+                                                {row.coin_type_name?.replace(' (Ungraded)', '')}
+                                              </span>
+                                              {isUngraded && (
+                                                <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-xs font-medium">
+                                                  UG
+                                                </span>
+                                              )}
+                                            </div>
                                             {row.batch_name && (
-                                              <span className="text-xs text-slate-400 ml-2">({row.batch_name})</span>
+                                              <span className="text-xs text-slate-400">({row.batch_name})</span>
                                             )}
                                           </td>
                                           <td className="px-4 py-2 text-right">{row.user_contributed}</td>
@@ -438,8 +448,8 @@ export default function Payouts() {
                                           <td className="px-4 py-2 text-right">
                                             {noSales ? (
                                               <span className="text-slate-400">—</span>
-                                            ) : isLoss ? (
-                                              <span className="text-red-600 font-medium">{formatCurrency(totalPayout)}</span>
+                                            ) : isNegativeProfit ? (
+                                              <span className="text-amber-600 font-medium">{formatCurrency(totalPayout)}</span>
                                             ) : (
                                               <span className="text-emerald-600">{formatCurrency(totalPayout)}</span>
                                             )}
@@ -447,12 +457,10 @@ export default function Payouts() {
                                           <td className="px-4 py-2 text-right font-medium">
                                             {noSales ? (
                                               <span className="text-slate-400">—</span>
-                                            ) : isLoss ? (
-                                              <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs">Loss</span>
                                             ) : userPayout > 0 ? (
                                               <span className="text-emerald-600">{formatCurrency(userPayout)}</span>
                                             ) : (
-                                              <span className="text-slate-400">$0.00</span>
+                                              <span className="text-slate-500">{formatCurrency(userPayout)}</span>
                                             )}
                                           </td>
                                         </tr>
