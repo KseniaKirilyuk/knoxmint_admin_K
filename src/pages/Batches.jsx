@@ -965,25 +965,23 @@ export default function Batches() {
                     >
                       <Scissors className="w-4 h-4" /> Grading Results
                     </button>
-                    {/* Show cleanup button if there are ungraded contributions (from old split logic) */}
-                    {batchDetails.contributions?.some(c => c.is_ungraded || c.coin_type_name?.includes('(Ungraded)')) && (
-                      <button 
-                        onClick={async () => {
-                          if (!confirm('This will merge ungraded contribution entries back into the main coin type. Continue?')) return;
-                          try {
-                            const res = await api.post('/batches?action=cleanupUngradedContributions', { batchId: batch.batch_id });
-                            alert(res.data.message);
-                            fetchBatchDetails(batch.batch_id);
-                          } catch (err) {
-                            alert('Error cleaning up: ' + (err.response?.data?.error || err.message));
-                          }
-                        }}
-                        className="btn btn-secondary btn-sm gap-1 text-amber-600 hover:bg-amber-50"
-                        title="Merge ungraded contribution entries back into graded (fixes old data)"
-                      >
-                        <RefreshCw className="w-4 h-4" /> Fix Split Data
-                      </button>
-                    )}
+                    {/* Cleanup button to fix old split data */}
+                    <button 
+                      onClick={async () => {
+                        if (!confirm('This will merge any ungraded contribution entries back into the main coin type. This fixes data from the old split system. Continue?')) return;
+                        try {
+                          const res = await api.post('/batches?action=cleanupUngradedContributions', { batchId: batch.batch_id });
+                          alert(res.data.message);
+                          fetchBatchDetails(batch.batch_id);
+                        } catch (err) {
+                          alert('Error: ' + (err.response?.data?.error || err.message));
+                        }
+                      }}
+                      className="btn btn-secondary btn-sm gap-1"
+                      title="Merge ungraded contribution entries back into graded"
+                    >
+                      <RefreshCw className="w-4 h-4" /> Fix Contributions
+                    </button>
                     <button onClick={() => openEditModal(batch)} className="btn btn-secondary btn-sm gap-1">
                       <Edit2 className="w-4 h-4" /> Edit Batch
                     </button>

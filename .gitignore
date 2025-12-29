@@ -1,4 +1,4 @@
-# Dependencies
+unzip -o ~/Downloads/knoxmint-vercel.zip -d ~/Downloads/# Dependencies
 node_modules/
 
 # Build
