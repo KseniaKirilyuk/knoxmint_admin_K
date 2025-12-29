@@ -584,7 +584,7 @@ export default function Batches() {
         const summary = response.data.results.map(r => 
           r.error 
             ? `${r.catalogId || r.coinTypeId}: ${r.error}` 
-            : `${r.catalogId}: ${r.totalGraded} graded, ${r.totalUngraded} ungraded`
+            : `${r.catalogId}: ${r.graded} graded, ${r.ungraded} ungraded`
         ).join('\n')
         alert('Split updated!\n\n' + summary)
       }
