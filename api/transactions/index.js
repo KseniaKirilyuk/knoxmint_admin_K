@@ -385,7 +385,13 @@ export default async function handler(req, res) {
       return res.json({ 
         success: true, 
         transactionId: result.rows[0].transaction_id,
-        calculated: { coinCost: coinCost * qty, profit, profitShare, memberPayout }
+        calculated: { 
+          coinCost: totalCoinCost, 
+          gradingCost: totalGradingCost,
+          profit, 
+          profitShare, 
+          memberPayout 
+        }
       });
     }
 
