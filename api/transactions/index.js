@@ -300,6 +300,61 @@ export default async function handler(req, res) {
       return res.json({ success: true, updated });
     }
 
+    // Create a new sale (for testing)
+    if (req.method === 'POST') {
+      if (user.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
+      
+      const { 
+        batchId, 
+        coinTypeId, 
+        itemTitle, 
+        saleDate, 
+        salePrice, 
+        ebayFee, 
+        advertisingFee, 
+        shippingCost, 
+        quantitySold,
+        grade 
+      } = req.body;
+
+      if (!batchId || !coinTypeId || !saleDate || !salePrice) {
+        return res.status(400).json({ error: 'Batch, coin type, date, and price are required' });
+      }
+
+      const result = await query(`
+        INSERT INTO sales_transactions (
+          batch_id, coin_type_id, item_title, sale_date, sale_price,
+          ebay_fee, advertising_fee, shipping_cost, quantity_sold, grade
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        RETURNING transaction_id
+      `, [
+        batchId,
+        coinTypeId,
+        itemTitle || 'Test Sale',
+        saleDate,
+        salePrice,
+        ebayFee || 0,
+        advertisingFee || 0,
+        shippingCost || 0,
+        quantitySold || 1,
+        grade || null
+      ]);
+
+      // Update batch_coins sold counts
+      await query(`
+        UPDATE batch_coins bc
+        SET total_sold = (
+          SELECT COALESCE(SUM(st.quantity_sold), 0)
+          FROM sales_transactions st
+          WHERE st.coin_type_id = bc.coin_type_id
+            AND COALESCE(st.is_refund, false) = false
+        )
+        WHERE bc.coin_type_id = $1
+      `, [coinTypeId]);
+
+      return res.json({ success: true, transactionId: result.rows[0].transaction_id });
+    }
+
     if (req.method === 'DELETE') {
       if (user.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
       

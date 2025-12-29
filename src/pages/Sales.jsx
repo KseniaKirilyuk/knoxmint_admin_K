@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
-import { Search, Download, ChevronLeft, ChevronRight, Trash2, TrendingUp, TrendingDown, AlertTriangle, X, Wand2, Edit2 } from 'lucide-react'
+import { Search, Download, ChevronLeft, ChevronRight, Trash2, TrendingUp, TrendingDown, AlertTriangle, X, Wand2, Edit2, Plus } from 'lucide-react'
 import api from '../lib/api'
 
 export default function Sales() {
   const [transactions, setTransactions] = useState([])
   const [coinTypes, setCoinTypes] = useState([])
+  const [batches, setBatches] = useState([])
   const [loading, setLoading] = useState(true)
   const [summary, setSummary] = useState(null)
   const [unmappedCount, setUnmappedCount] = useState(0)
@@ -36,8 +37,24 @@ export default function Sales() {
   const [editingTx, setEditingTx] = useState(null)
   const [editForm, setEditForm] = useState({})
 
+  // Create test sale state
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [createForm, setCreateForm] = useState({
+    batchId: '',
+    coinTypeId: '',
+    itemTitle: 'Test Sale',
+    saleDate: new Date().toISOString().split('T')[0],
+    salePrice: '',
+    ebayFee: '',
+    advertisingFee: '',
+    shippingCost: '',
+    quantitySold: 1,
+    grade: ''
+  })
+
   useEffect(() => {
     fetchCoinTypes()
+    fetchBatches()
   }, [])
 
   useEffect(() => {
@@ -61,6 +78,15 @@ export default function Sales() {
       setCoinTypes(res.data)
     } catch (error) {
       console.error('Error fetching coin types:', error)
+    }
+  }
+
+  const fetchBatches = async () => {
+    try {
+      const res = await api.get('/batches')
+      setBatches(res.data)
+    } catch (error) {
+      console.error('Error fetching batches:', error)
     }
   }
 
@@ -94,6 +120,30 @@ export default function Sales() {
       fetchTransactions()
     } catch (error) {
       alert('Error deleting transaction')
+    }
+  }
+
+  const handleCreateSale = async (e) => {
+    e.preventDefault()
+    try {
+      await api.post('/transactions', createForm)
+      setShowCreateModal(false)
+      setCreateForm({
+        batchId: '',
+        coinTypeId: '',
+        itemTitle: 'Test Sale',
+        saleDate: new Date().toISOString().split('T')[0],
+        salePrice: '',
+        ebayFee: '',
+        advertisingFee: '',
+        shippingCost: '',
+        quantitySold: 1,
+        grade: ''
+      })
+      fetchTransactions()
+      alert('Test sale created!')
+    } catch (error) {
+      alert('Error creating sale: ' + (error.response?.data?.error || error.message))
     }
   }
 
@@ -262,10 +312,16 @@ export default function Sales() {
           <h1 className="text-2xl font-bold text-slate-900">Sales Transactions</h1>
           <p className="text-slate-500 mt-1">View all imported eBay sales</p>
         </div>
-        <button onClick={exportCSV} className="btn btn-secondary gap-2">
-          <Download className="w-4 h-4" />
-          Export CSV
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => setShowCreateModal(true)} className="btn btn-primary gap-2">
+            <Plus className="w-4 h-4" />
+            Create Test Sale
+          </button>
+          <button onClick={exportCSV} className="btn btn-secondary gap-2">
+            <Download className="w-4 h-4" />
+            Export CSV
+          </button>
+        </div>
       </div>
 
       {/* Summary Cards */}
@@ -834,6 +890,165 @@ export default function Sales() {
                 Save Changes
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Test Sale Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <h2 className="text-lg font-semibold">Create Test Sale</h2>
+              <button onClick={() => setShowCreateModal(false)} className="p-2 hover:bg-slate-100 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleCreateSale} className="p-6 space-y-4">
+              <div>
+                <label className="label">Batch *</label>
+                <select
+                  className="input"
+                  value={createForm.batchId}
+                  onChange={(e) => setCreateForm(prev => ({ ...prev, batchId: e.target.value }))}
+                  required
+                >
+                  <option value="">Select batch...</option>
+                  {batches.map(b => (
+                    <option key={b.batch_id} value={b.batch_id}>{b.batch_name}</option>
+                  ))}
+                </select>
+              </div>
+              
+              <div>
+                <label className="label">Coin Type *</label>
+                <select
+                  className="input"
+                  value={createForm.coinTypeId}
+                  onChange={(e) => setCreateForm(prev => ({ ...prev, coinTypeId: e.target.value }))}
+                  required
+                >
+                  <option value="">Select coin type...</option>
+                  {coinTypes.map(ct => (
+                    <option key={ct.coin_type_id} value={ct.coin_type_id}>
+                      {ct.name} {ct.is_ungraded ? '(UG)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="label">Item Title</label>
+                <input
+                  type="text"
+                  className="input"
+                  value={createForm.itemTitle}
+                  onChange={(e) => setCreateForm(prev => ({ ...prev, itemTitle: e.target.value }))}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Sale Date *</label>
+                  <input
+                    type="date"
+                    className="input"
+                    value={createForm.saleDate}
+                    onChange={(e) => setCreateForm(prev => ({ ...prev, saleDate: e.target.value }))}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="label">Sale Price *</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="input"
+                    placeholder="200.00"
+                    value={createForm.salePrice}
+                    onChange={(e) => setCreateForm(prev => ({ ...prev, salePrice: e.target.value }))}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="label">eBay Fee</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="input"
+                    placeholder="20.00"
+                    value={createForm.ebayFee}
+                    onChange={(e) => setCreateForm(prev => ({ ...prev, ebayFee: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="label">Ad Fee</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="input"
+                    placeholder="5.00"
+                    value={createForm.advertisingFee}
+                    onChange={(e) => setCreateForm(prev => ({ ...prev, advertisingFee: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="label">Shipping</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="input"
+                    placeholder="10.00"
+                    value={createForm.shippingCost}
+                    onChange={(e) => setCreateForm(prev => ({ ...prev, shippingCost: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Quantity</label>
+                  <input
+                    type="number"
+                    className="input"
+                    value={createForm.quantitySold}
+                    onChange={(e) => setCreateForm(prev => ({ ...prev, quantitySold: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="label">Grade (optional)</label>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="MS70, PR70, etc."
+                    value={createForm.grade}
+                    onChange={(e) => setCreateForm(prev => ({ ...prev, grade: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              <div className="bg-slate-100 rounded-lg p-3 text-sm">
+                <p className="font-medium text-slate-700">Calculated:</p>
+                <p className="text-slate-600">
+                  Total Fees: ${((parseFloat(createForm.ebayFee) || 0) + (parseFloat(createForm.advertisingFee) || 0) + (parseFloat(createForm.shippingCost) || 0)).toFixed(2)}
+                </p>
+                <p className="text-slate-600">
+                  Net Payout: ${((parseFloat(createForm.salePrice) || 0) - (parseFloat(createForm.ebayFee) || 0) - (parseFloat(createForm.advertisingFee) || 0) - (parseFloat(createForm.shippingCost) || 0)).toFixed(2)}
+                </p>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setShowCreateModal(false)} className="btn btn-secondary flex-1">
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary flex-1">
+                  Create Sale
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
