@@ -90,6 +90,7 @@ export default async function handler(req, res) {
       }
 
       // Get breakdown for a specific member
+      // Includes graded/ungraded sub-breakdown for each coin type
       if (action === 'memberBreakdown' && userId) {
         const result = await query(`
           WITH coin_totals AS (
@@ -108,10 +109,12 @@ export default async function handler(req, res) {
               uc.batch_id,
               uc.coin_type_id,
               uc.quantity as user_contributed,
-              ct.total_for_coin,
-              uc.quantity::decimal / NULLIF(ct.total_for_coin, 0) as share_pct
+              ct_totals.total_for_coin,
+              uc.quantity::decimal / NULLIF(ct_totals.total_for_coin, 0) as share_pct,
+              ct.catalog_id
             FROM user_contributions uc
-            JOIN coin_totals ct ON uc.coin_type_id = ct.coin_type_id
+            JOIN coin_totals ct_totals ON uc.coin_type_id = ct_totals.coin_type_id
+            JOIN coin_types ct ON uc.coin_type_id = ct.coin_type_id
             WHERE uc.user_id = $1 AND uc.quantity > 0
           ),
           coin_sales AS (
@@ -121,15 +124,36 @@ export default async function handler(req, res) {
               uc.user_contributed,
               uc.total_for_coin,
               uc.share_pct,
-              COUNT(CASE WHEN COALESCE(st.is_refund, false) = false THEN st.transaction_id END) as sales_count,
-              COUNT(CASE WHEN st.is_refund = true THEN st.transaction_id END) as refund_count,
+              uc.catalog_id,
+              -- Total sales (graded + ungraded)
               COALESCE(SUM(st.quantity_sold), 0) as total_sold,
               COALESCE(SUM(st.payout), 0) as total_payout_all,
               COALESCE(SUM(st.payout * uc.share_pct), 0) as user_payout,
-              COALESCE(SUM(CASE WHEN st.is_refund = true THEN st.payout * uc.share_pct ELSE 0 END), 0) as refund_amount
+              -- Graded only (same coin_type_id)
+              COALESCE(SUM(CASE WHEN st.coin_type_id = uc.coin_type_id THEN st.quantity_sold ELSE 0 END), 0) as graded_sold,
+              COALESCE(SUM(CASE WHEN st.coin_type_id = uc.coin_type_id THEN st.payout ELSE 0 END), 0) as graded_payout_all,
+              COALESCE(SUM(CASE WHEN st.coin_type_id = uc.coin_type_id THEN st.payout * uc.share_pct ELSE 0 END), 0) as graded_user_payout
             FROM user_contribs uc
-            LEFT JOIN sales_transactions st ON uc.coin_type_id = st.coin_type_id
-            GROUP BY uc.batch_id, uc.coin_type_id, uc.user_contributed, uc.total_for_coin, uc.share_pct
+            LEFT JOIN sales_transactions st ON st.coin_type_id = uc.coin_type_id
+              AND COALESCE(st.is_refund, false) = false
+            GROUP BY uc.batch_id, uc.coin_type_id, uc.user_contributed, uc.total_for_coin, uc.share_pct, uc.catalog_id
+          ),
+          -- Get ungraded sales separately
+          ungraded_sales AS (
+            SELECT 
+              cs.batch_id,
+              cs.coin_type_id,
+              COALESCE(SUM(st.quantity_sold), 0) as ungraded_sold,
+              COALESCE(SUM(st.payout), 0) as ungraded_payout_all,
+              COALESCE(SUM(st.payout * cs.share_pct), 0) as ungraded_user_payout,
+              bc.total_contributed as ungraded_pool
+            FROM coin_sales cs
+            JOIN coin_types ug ON ug.catalog_id = cs.catalog_id AND ug.is_ungraded = true
+            LEFT JOIN batch_coins bc ON bc.batch_id = cs.batch_id AND bc.coin_type_id = ug.coin_type_id
+            LEFT JOIN sales_transactions st ON st.coin_type_id = ug.coin_type_id 
+              AND st.batch_id = cs.batch_id
+              AND COALESCE(st.is_refund, false) = false
+            GROUP BY cs.batch_id, cs.coin_type_id, bc.total_contributed
           )
           SELECT 
             b.batch_id,
@@ -139,15 +163,25 @@ export default async function handler(req, res) {
             ct.name as coin_type_name,
             cs.user_contributed,
             cs.total_for_coin,
-            cs.total_sold,
-            cs.total_payout_all,
-            cs.user_payout,
-            cs.refund_count,
-            cs.refund_amount,
-            ROUND(cs.share_pct * 100, 1) as share_pct
+            cs.total_sold + COALESCE(us.ungraded_sold, 0) as total_sold,
+            cs.total_payout_all + COALESCE(us.ungraded_payout_all, 0) as total_payout_all,
+            cs.user_payout + COALESCE(us.ungraded_user_payout, 0) as user_payout,
+            ROUND(cs.share_pct * 100, 1) as share_pct,
+            -- Graded breakdown
+            bc.total_contributed as graded_pool,
+            cs.graded_sold,
+            cs.graded_payout_all,
+            cs.graded_user_payout,
+            -- Ungraded breakdown
+            COALESCE(us.ungraded_pool, 0) as ungraded_pool,
+            COALESCE(us.ungraded_sold, 0) as ungraded_sold,
+            COALESCE(us.ungraded_payout_all, 0) as ungraded_payout_all,
+            COALESCE(us.ungraded_user_payout, 0) as ungraded_user_payout
           FROM coin_sales cs
           JOIN batches b ON cs.batch_id = b.batch_id
           JOIN coin_types ct ON cs.coin_type_id = ct.coin_type_id
+          LEFT JOIN batch_coins bc ON bc.batch_id = cs.batch_id AND bc.coin_type_id = cs.coin_type_id
+          LEFT JOIN ungraded_sales us ON us.batch_id = cs.batch_id AND us.coin_type_id = cs.coin_type_id
           ORDER BY b.ship_date DESC NULLS LAST, ct.name
         `, [userId]);
         return res.json(result.rows);

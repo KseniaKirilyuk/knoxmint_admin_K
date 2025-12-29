@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { DollarSign, CheckCircle, Clock, ChevronDown, ChevronRight, Users, Download, Pencil, Trash2 } from 'lucide-react'
 import api from '../lib/api'
 
@@ -414,56 +414,95 @@ export default function Payouts() {
                                         const isNegativeProfit = totalPayout < 0
                                         const noSales = parseInt(row.total_sold) === 0
                                         const isUngraded = row.coin_type_name?.includes('(Ungraded)')
+                                        
+                                        // Graded/Ungraded breakdown
+                                        const gradedPool = parseInt(row.graded_pool) || 0
+                                        const gradedSold = parseInt(row.graded_sold) || 0
+                                        const gradedPayoutAll = parseFloat(row.graded_payout_all) || 0
+                                        const gradedUserPayout = parseFloat(row.graded_user_payout) || 0
+                                        const ungradedPool = parseInt(row.ungraded_pool) || 0
+                                        const ungradedSold = parseInt(row.ungraded_sold) || 0
+                                        const ungradedPayoutAll = parseFloat(row.ungraded_payout_all) || 0
+                                        const ungradedUserPayout = parseFloat(row.ungraded_user_payout) || 0
+                                        const hasUngraded = ungradedPool > 0
+                                        
                                         return (
-                                        <tr key={idx} className={`border-t ${isNegativeProfit ? 'bg-amber-50' : ''}`}>
-                                          <td className="px-4 py-2">
-                                            <div className="flex items-center gap-2">
-                                              <span className="font-medium text-slate-900">
-                                                {row.coin_type_name?.replace(' (Ungraded)', '')}
-                                              </span>
-                                              {isUngraded && (
-                                                <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-xs font-medium">
-                                                  UG
+                                        <React.Fragment key={idx}>
+                                          <tr className={`border-t ${isNegativeProfit ? 'bg-amber-50' : ''}`}>
+                                            <td className="px-4 py-2">
+                                              <div className="flex items-center gap-2">
+                                                <span className="font-medium text-slate-900">
+                                                  {row.coin_type_name?.replace(' (Ungraded)', '')}
                                                 </span>
+                                                {isUngraded && (
+                                                  <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-xs font-medium">
+                                                    UG
+                                                  </span>
+                                                )}
+                                              </div>
+                                              {row.batch_name && (
+                                                <span className="text-xs text-slate-400">({row.batch_name})</span>
                                               )}
-                                            </div>
-                                            {row.batch_name && (
-                                              <span className="text-xs text-slate-400">({row.batch_name})</span>
-                                            )}
-                                          </td>
-                                          <td className="px-4 py-2 text-right">{row.user_contributed}</td>
-                                          <td className="px-4 py-2 text-right text-slate-500">{row.total_for_coin}</td>
-                                          <td className="px-4 py-2 text-right">
-                                            {parseInt(row.total_sold) > 0 ? (
-                                              <span className="text-emerald-600">{row.total_sold}</span>
-                                            ) : (
-                                              <span className="text-slate-400">0</span>
-                                            )}
-                                          </td>
-                                          <td className="px-4 py-2 text-right">
-                                            <span className="px-2 py-0.5 bg-knox-50 text-knox-700 rounded text-xs">
-                                              {row.share_pct}%
-                                            </span>
-                                          </td>
-                                          <td className="px-4 py-2 text-right">
-                                            {noSales ? (
-                                              <span className="text-slate-400">—</span>
-                                            ) : isNegativeProfit ? (
-                                              <span className="text-amber-600 font-medium">{formatCurrency(totalPayout)}</span>
-                                            ) : (
-                                              <span className="text-emerald-600">{formatCurrency(totalPayout)}</span>
-                                            )}
-                                          </td>
-                                          <td className="px-4 py-2 text-right font-medium">
-                                            {noSales ? (
-                                              <span className="text-slate-400">—</span>
-                                            ) : userPayout > 0 ? (
-                                              <span className="text-emerald-600">{formatCurrency(userPayout)}</span>
-                                            ) : (
-                                              <span className="text-slate-500">{formatCurrency(userPayout)}</span>
-                                            )}
-                                          </td>
-                                        </tr>
+                                            </td>
+                                            <td className="px-4 py-2 text-right">{row.user_contributed}</td>
+                                            <td className="px-4 py-2 text-right text-slate-500">{row.total_for_coin}</td>
+                                            <td className="px-4 py-2 text-right">
+                                              {parseInt(row.total_sold) > 0 ? (
+                                                <span className="text-emerald-600">{row.total_sold}</span>
+                                              ) : (
+                                                <span className="text-slate-400">0</span>
+                                              )}
+                                            </td>
+                                            <td className="px-4 py-2 text-right">
+                                              <span className="px-2 py-0.5 bg-knox-50 text-knox-700 rounded text-xs">
+                                                {row.share_pct}%
+                                              </span>
+                                            </td>
+                                            <td className="px-4 py-2 text-right">
+                                              {noSales ? (
+                                                <span className="text-slate-400">—</span>
+                                              ) : isNegativeProfit ? (
+                                                <span className="text-amber-600 font-medium">{formatCurrency(totalPayout)}</span>
+                                              ) : (
+                                                <span className="text-emerald-600">{formatCurrency(totalPayout)}</span>
+                                              )}
+                                            </td>
+                                            <td className="px-4 py-2 text-right font-medium">
+                                              {noSales ? (
+                                                <span className="text-slate-400">—</span>
+                                              ) : userPayout > 0 ? (
+                                                <span className="text-emerald-600">{formatCurrency(userPayout)}</span>
+                                              ) : (
+                                                <span className="text-slate-500">{formatCurrency(userPayout)}</span>
+                                              )}
+                                            </td>
+                                          </tr>
+                                          {/* Sub-rows for graded/ungraded breakdown */}
+                                          {(gradedSold > 0 || ungradedSold > 0) && (
+                                            <tr className="bg-slate-50/50">
+                                              <td colSpan={7} className="px-4 py-1.5">
+                                                <div className="flex flex-col gap-0.5 text-xs text-slate-500 pl-4 border-l-2 border-slate-200">
+                                                  {gradedPool > 0 && (
+                                                    <div className="flex items-center gap-4">
+                                                      <span className="w-20">Graded:</span>
+                                                      <span>{gradedSold} of {gradedPool} sold</span>
+                                                      <span>→ Pool: {formatCurrency(gradedPayoutAll)}</span>
+                                                      <span>→ You: <span className={gradedUserPayout >= 0 ? 'text-emerald-600' : 'text-amber-600'}>{formatCurrency(gradedUserPayout)}</span></span>
+                                                    </div>
+                                                  )}
+                                                  {hasUngraded && (
+                                                    <div className="flex items-center gap-4">
+                                                      <span className="w-20">Ungraded:</span>
+                                                      <span>{ungradedSold} of {ungradedPool} sold</span>
+                                                      <span>→ Pool: {formatCurrency(ungradedPayoutAll)}</span>
+                                                      <span>→ You: <span className={ungradedUserPayout >= 0 ? 'text-emerald-600' : 'text-amber-600'}>{formatCurrency(ungradedUserPayout)}</span></span>
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              </td>
+                                            </tr>
+                                          )}
+                                        </React.Fragment>
                                         )
                                       })}
                                     </tbody>
