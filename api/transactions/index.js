@@ -321,23 +321,49 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Batch, coin type, date, and price are required' });
       }
 
+      // Get cost per coin from batch_coins
+      const costResult = await query(`
+        SELECT COALESCE(cost_per_coin, 0) + COALESCE(grading_cost_per_coin, 0) as total_cost
+        FROM batch_coins
+        WHERE batch_id = $1 AND coin_type_id = $2
+      `, [batchId, coinTypeId]);
+
+      const coinCost = costResult.rows.length > 0 ? parseFloat(costResult.rows[0].total_cost) : 0;
+      const qty = parseInt(quantitySold) || 1;
+      
+      // Calculate payout
+      const price = parseFloat(salePrice) || 0;
+      const fees = (parseFloat(ebayFee) || 0) + (parseFloat(advertisingFee) || 0) + (parseFloat(shippingCost) || 0);
+      const totalPayout = price - fees;
+      const profit = totalPayout - (coinCost * qty);
+      const profitShare = profit > 0 ? Math.max(0.33 * profit, 8) : 0;
+      const memberPayout = profit > 0 ? profit - profitShare : profit;
+      const margin = price > 0 ? (profit / price) : 0;
+
       const result = await query(`
         INSERT INTO sales_transactions (
           batch_id, coin_type_id, item_title, sale_date, sale_price,
-          ebay_fee, advertising_fee, shipping_cost, quantity_sold, grade
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          ebay_fee, advertising_fee, shipping_cost, quantity_sold, grade,
+          total_payout, coin_cost, profit, profit_share, payout, profit_margin
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
         RETURNING transaction_id
       `, [
         batchId,
         coinTypeId,
         itemTitle || 'Test Sale',
         saleDate,
-        salePrice,
-        ebayFee || 0,
-        advertisingFee || 0,
-        shippingCost || 0,
-        quantitySold || 1,
-        grade || null
+        price,
+        parseFloat(ebayFee) || 0,
+        parseFloat(advertisingFee) || 0,
+        parseFloat(shippingCost) || 0,
+        qty,
+        grade || null,
+        totalPayout,
+        coinCost * qty,
+        profit,
+        profitShare,
+        memberPayout,
+        margin
       ]);
 
       // Update batch_coins sold counts
@@ -352,7 +378,11 @@ export default async function handler(req, res) {
         WHERE bc.coin_type_id = $1
       `, [coinTypeId]);
 
-      return res.json({ success: true, transactionId: result.rows[0].transaction_id });
+      return res.json({ 
+        success: true, 
+        transactionId: result.rows[0].transaction_id,
+        calculated: { coinCost: coinCost * qty, profit, profitShare, memberPayout }
+      });
     }
 
     if (req.method === 'DELETE') {

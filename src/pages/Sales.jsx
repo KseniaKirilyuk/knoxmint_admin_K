@@ -126,7 +126,7 @@ export default function Sales() {
   const handleCreateSale = async (e) => {
     e.preventDefault()
     try {
-      await api.post('/transactions', createForm)
+      const response = await api.post('/transactions', createForm)
       setShowCreateModal(false)
       setCreateForm({
         batchId: '',
@@ -141,7 +141,13 @@ export default function Sales() {
         grade: ''
       })
       fetchTransactions()
-      alert('Test sale created!')
+      
+      const calc = response.data.calculated
+      if (calc) {
+        alert(`Sale created!\n\nCoin Cost: $${calc.coinCost.toFixed(2)}\nProfit: $${calc.profit.toFixed(2)}\nProfit Share (33%): $${calc.profitShare.toFixed(2)}\nMember Payout: $${calc.memberPayout.toFixed(2)}`)
+      } else {
+        alert('Sale created!')
+      }
     } catch (error) {
       alert('Error creating sale: ' + (error.response?.data?.error || error.message))
     }
@@ -1037,6 +1043,9 @@ export default function Sales() {
                 </p>
                 <p className="text-slate-600">
                   Net Payout: ${((parseFloat(createForm.salePrice) || 0) - (parseFloat(createForm.ebayFee) || 0) - (parseFloat(createForm.advertisingFee) || 0) - (parseFloat(createForm.shippingCost) || 0)).toFixed(2)}
+                </p>
+                <p className="text-slate-500 text-xs mt-1">
+                  Note: Coin cost is pulled from "Edit Prices" in the batch. Make sure costs are set first!
                 </p>
               </div>
 
