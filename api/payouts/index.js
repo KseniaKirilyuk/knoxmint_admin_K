@@ -227,27 +227,26 @@ export default async function handler(req, res) {
         const { batchId } = req.query;
         if (!batchId) return res.status(400).json({ error: 'Batch ID required' });
         
+        // Query directly from sales_transactions to avoid duplicate counting
         const result = await query(`
           SELECT 
-            ct.coin_type_id,
+            st.coin_type_id,
             ct.name as coin_type_name,
             ct.is_ungraded,
             bc.total_contributed as pool,
-            COALESCE(SUM(st.quantity_sold), 0) as sold,
+            SUM(st.quantity_sold) as sold,
             bc.cost_per_coin,
             bc.grading_cost_per_coin,
-            COALESCE(SUM(st.total_payout), 0) as ebay_payout,
-            COALESCE(SUM(st.profit), 0) as profit,
-            COALESCE(SUM(st.profit_share), 0) as admin_share,
-            COALESCE(SUM(st.profit), 0) - COALESCE(SUM(st.profit_share), 0) as member_profit,
-            COALESCE(SUM(st.payout), 0) as member_payout
-          FROM batch_coins bc
-          JOIN coin_types ct ON bc.coin_type_id = ct.coin_type_id
-          LEFT JOIN sales_transactions st ON st.batch_id = bc.batch_id 
-            AND st.coin_type_id = bc.coin_type_id 
-            AND COALESCE(st.is_refund, false) = false
-          WHERE bc.batch_id = $1
-          GROUP BY ct.coin_type_id, ct.name, ct.is_ungraded, bc.total_contributed, bc.cost_per_coin, bc.grading_cost_per_coin
+            SUM(st.total_payout) as ebay_payout,
+            SUM(st.profit) as profit,
+            SUM(st.profit_share) as admin_share,
+            SUM(st.profit) - SUM(st.profit_share) as member_profit,
+            SUM(st.payout) as member_payout
+          FROM sales_transactions st
+          JOIN coin_types ct ON st.coin_type_id = ct.coin_type_id
+          LEFT JOIN batch_coins bc ON bc.batch_id = st.batch_id AND bc.coin_type_id = st.coin_type_id
+          WHERE st.batch_id = $1 AND COALESCE(st.is_refund, false) = false
+          GROUP BY st.coin_type_id, ct.name, ct.is_ungraded, bc.total_contributed, bc.cost_per_coin, bc.grading_cost_per_coin
           ORDER BY ct.name
         `, [batchId]);
         return res.json(result.rows);
