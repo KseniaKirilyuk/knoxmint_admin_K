@@ -42,6 +42,7 @@ export default async function handler(req, res) {
           b.batch_name,
           ct.name as coin_type_name,
           ct.short_code,
+          ct.is_ungraded,
           bc.cost_per_coin as unit_coin_cost,
           bc.grading_cost_per_coin as unit_grading_cost
         FROM sales_transactions st

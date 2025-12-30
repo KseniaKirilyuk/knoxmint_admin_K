@@ -524,6 +524,7 @@ export default function Sales() {
               <tr className="bg-slate-50 border-b">
                 <th className="table-header w-8"></th>
                 <th className="table-header">Listing</th>
+                <th className="table-header">Title</th>
                 <th className="table-header">Date</th>
                 <th className="table-header text-right">Price</th>
                 <th className="table-header text-right">eBay Fee</th>
@@ -539,13 +540,13 @@ export default function Sales() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={12} className="table-cell text-center py-8">
+                  <td colSpan={13} className="table-cell text-center py-8">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-knox-600 mx-auto"></div>
                   </td>
                 </tr>
               ) : transactions.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="table-cell text-center py-8 text-slate-500">
+                  <td colSpan={13} className="table-cell text-center py-8 text-slate-500">
                     No transactions found. <a href="/upload" className="text-knox-600 hover:underline">Import eBay sales</a>
                   </td>
                 </tr>
@@ -563,6 +564,7 @@ export default function Sales() {
                   const profit = ebayPayout - totalGradingCost - totalCoinCost
                   const adminShare = Math.max(0.33 * profit, 8 * qty)
                   const memberPayout = Math.max(0, ebayPayout - totalGradingCost - adminShare)
+                  const isUngraded = tx.is_ungraded || tx.coin_type_name?.includes('(Ungraded)')
                   
                   return (
                     <React.Fragment key={tx.transaction_id}>
@@ -578,6 +580,20 @@ export default function Sales() {
                           {tx.order_number || tx.listing_id || '-'}
                           {isRefund && <span className="ml-1 px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-[10px] font-medium">REFUND</span>}
                           {isRefunded && <span className="ml-1 px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded text-[10px] font-medium">REFUNDED</span>}
+                        </td>
+                        <td className="table-cell max-w-xs">
+                          <div className="flex items-center gap-1.5">
+                            <span className="truncate text-slate-700" title={tx.item_title}>
+                              {tx.coin_type_name || tx.item_title || '-'}
+                            </span>
+                            {tx.coin_type_name && (
+                              isUngraded ? (
+                                <span className="flex-shrink-0 px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-[10px] font-medium">UG</span>
+                              ) : (
+                                <span className="flex-shrink-0 px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded text-[10px] font-medium">GR</span>
+                              )
+                            )}
+                          </div>
                         </td>
                         <td className="table-cell whitespace-nowrap">
                           {tx.sale_date?.split('T')[0]}
@@ -623,7 +639,7 @@ export default function Sales() {
                       {/* Expanded Detail Row */}
                       {isExpanded && (
                         <tr className="bg-slate-50/80">
-                          <td colSpan={12} className="px-4 py-3 border-b">
+                          <td colSpan={13} className="px-4 py-3 border-b">
                             <div className="flex gap-8">
                               {/* Left: Item Info */}
                               <div className="flex-1">
