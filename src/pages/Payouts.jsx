@@ -352,9 +352,10 @@ export default function Payouts() {
             batchTotals.map((batch) => {
               const isExpanded = expandedBatches[batch.batch_id]
               const breakdown = batchBreakdowns[batch.batch_id] || []
-              const revenue = parseFloat(batch.total_revenue) || 0
+              const ebayPayout = parseFloat(batch.total_ebay_payout) || 0
               const profit = parseFloat(batch.total_profit) || 0
               const adminShare = parseFloat(batch.total_admin_share) || 0
+              const memberProfit = parseFloat(batch.total_member_profit) || 0
               const memberPayout = parseFloat(batch.total_member_payout) || 0
               const totalSold = parseInt(batch.total_sold) || 0
               const totalCoins = parseInt(batch.total_coins) || 0
@@ -372,7 +373,7 @@ export default function Payouts() {
                         <div>
                           <h3 className="font-semibold text-slate-900">{batch.batch_name}</h3>
                           <p className="text-xs text-slate-500">
-                            {batch.ship_date?.split('T')[0] || 'No ship date'} • {batch.contributor_count} contributors
+                            {batch.ship_date?.split('T')[0] || 'No ship date'} • {batch.contributor_count} contributors • {totalSold}/{totalCoins} sold
                           </p>
                         </div>
                       </div>
@@ -380,12 +381,8 @@ export default function Payouts() {
                       {/* Summary Stats */}
                       <div className="flex items-center gap-6 text-sm">
                         <div className="text-center">
-                          <p className="text-slate-500 text-xs">Sold</p>
-                          <p className="font-semibold">{totalSold} / {totalCoins}</p>
-                        </div>
-                        <div className="text-center">
-                          <p className="text-slate-500 text-xs">Revenue</p>
-                          <p className="font-semibold">{formatCurrency(revenue)}</p>
+                          <p className="text-slate-500 text-xs">eBay Payout</p>
+                          <p className="font-semibold">{formatCurrency(ebayPayout)}</p>
                         </div>
                         <div className="text-center">
                           <p className="text-slate-500 text-xs">Profit</p>
@@ -394,11 +391,17 @@ export default function Payouts() {
                           </p>
                         </div>
                         <div className="text-center">
-                          <p className="text-slate-500 text-xs">Admin</p>
+                          <p className="text-slate-500 text-xs">Admin Share</p>
                           <p className="font-semibold text-amber-600">{formatCurrency(adminShare)}</p>
                         </div>
                         <div className="text-center">
-                          <p className="text-slate-500 text-xs">Member $</p>
+                          <p className="text-slate-500 text-xs">Member Profit</p>
+                          <p className={`font-semibold ${memberProfit >= 0 ? 'text-slate-700' : 'text-red-600'}`}>
+                            {formatCurrency(memberProfit)}
+                          </p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-slate-500 text-xs">Member Payout</p>
                           <p className="font-semibold text-emerald-600">{formatCurrency(memberPayout)}</p>
                         </div>
                       </div>
@@ -427,24 +430,24 @@ export default function Payouts() {
                             <th className="px-4 py-2 text-left">Coin Type</th>
                             <th className="px-4 py-2 text-right">Pool</th>
                             <th className="px-4 py-2 text-right">Sold</th>
-                            <th className="px-4 py-2 text-right">Cost/Coin</th>
-                            <th className="px-4 py-2 text-right">Grading</th>
-                            <th className="px-4 py-2 text-right">Revenue</th>
+                            <th className="px-4 py-2 text-right">eBay Payout</th>
                             <th className="px-4 py-2 text-right">Profit</th>
-                            <th className="px-4 py-2 text-right">Admin</th>
-                            <th className="px-4 py-2 text-right">Member $</th>
+                            <th className="px-4 py-2 text-right">Admin Share</th>
+                            <th className="px-4 py-2 text-right">Member Profit</th>
+                            <th className="px-4 py-2 text-right">Member Payout</th>
                           </tr>
                         </thead>
                         <tbody>
                           {breakdown.length === 0 ? (
                             <tr>
-                              <td colSpan={9} className="px-4 py-4 text-center text-slate-400">
+                              <td colSpan={8} className="px-4 py-4 text-center text-slate-400">
                                 Loading...
                               </td>
                             </tr>
                           ) : (
                             breakdown.map((row, idx) => {
                               const rowProfit = parseFloat(row.profit) || 0
+                              const rowMemberProfit = parseFloat(row.member_profit) || 0
                               const isUngraded = row.is_ungraded
                               return (
                                 <tr key={idx} className="border-b border-slate-100 hover:bg-white">
@@ -464,13 +467,14 @@ export default function Payouts() {
                                       {row.sold || 0}
                                     </span>
                                   </td>
-                                  <td className="px-4 py-2 text-right">{formatCurrency(row.cost_per_coin)}</td>
-                                  <td className="px-4 py-2 text-right">{formatCurrency(row.grading_cost_per_coin)}</td>
-                                  <td className="px-4 py-2 text-right">{formatCurrency(row.revenue)}</td>
+                                  <td className="px-4 py-2 text-right">{formatCurrency(row.ebay_payout)}</td>
                                   <td className={`px-4 py-2 text-right font-medium ${rowProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                                     {formatCurrency(row.profit)}
                                   </td>
                                   <td className="px-4 py-2 text-right text-amber-600">{formatCurrency(row.admin_share)}</td>
+                                  <td className={`px-4 py-2 text-right ${rowMemberProfit >= 0 ? 'text-slate-700' : 'text-red-600'}`}>
+                                    {formatCurrency(row.member_profit)}
+                                  </td>
                                   <td className="px-4 py-2 text-right font-medium text-emerald-600">{formatCurrency(row.member_payout)}</td>
                                 </tr>
                               )

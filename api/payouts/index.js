@@ -206,18 +206,15 @@ export default async function handler(req, res) {
             b.batch_id,
             b.batch_name,
             b.ship_date,
-            COUNT(DISTINCT uc.user_id) as contributor_count,
-            COALESCE(SUM(uc.quantity), 0) as total_coins,
-            COALESCE(SUM(bc.total_sold), 0) as total_sold,
-            COALESCE(SUM(st.sale_price), 0) as total_revenue,
-            COALESCE(SUM(bc.cost_per_coin * bc.total_contributed), 0) as total_coin_cost,
-            COALESCE(SUM(bc.grading_cost_per_coin * bc.total_contributed), 0) as total_grading_cost,
+            (SELECT COUNT(DISTINCT user_id) FROM user_contributions WHERE batch_id = b.batch_id) as contributor_count,
+            (SELECT COALESCE(SUM(total_contributed), 0) FROM batch_coins WHERE batch_id = b.batch_id) as total_coins,
+            COALESCE(SUM(st.quantity_sold), 0) as total_sold,
+            COALESCE(SUM(st.total_payout), 0) as total_ebay_payout,
             COALESCE(SUM(st.profit), 0) as total_profit,
             COALESCE(SUM(st.profit_share), 0) as total_admin_share,
+            COALESCE(SUM(st.profit), 0) - COALESCE(SUM(st.profit_share), 0) as total_member_profit,
             COALESCE(SUM(st.payout), 0) as total_member_payout
           FROM batches b
-          LEFT JOIN user_contributions uc ON b.batch_id = uc.batch_id
-          LEFT JOIN batch_coins bc ON b.batch_id = bc.batch_id
           LEFT JOIN sales_transactions st ON b.batch_id = st.batch_id AND COALESCE(st.is_refund, false) = false
           GROUP BY b.batch_id, b.batch_name, b.ship_date
           ORDER BY b.ship_date DESC NULLS LAST
@@ -236,13 +233,13 @@ export default async function handler(req, res) {
             ct.name as coin_type_name,
             ct.is_ungraded,
             bc.total_contributed as pool,
-            bc.total_sold as sold,
+            COALESCE(SUM(st.quantity_sold), 0) as sold,
             bc.cost_per_coin,
             bc.grading_cost_per_coin,
-            COALESCE(SUM(st.sale_price), 0) as revenue,
             COALESCE(SUM(st.total_payout), 0) as ebay_payout,
             COALESCE(SUM(st.profit), 0) as profit,
             COALESCE(SUM(st.profit_share), 0) as admin_share,
+            COALESCE(SUM(st.profit), 0) - COALESCE(SUM(st.profit_share), 0) as member_profit,
             COALESCE(SUM(st.payout), 0) as member_payout
           FROM batch_coins bc
           JOIN coin_types ct ON bc.coin_type_id = ct.coin_type_id
@@ -250,7 +247,7 @@ export default async function handler(req, res) {
             AND st.coin_type_id = bc.coin_type_id 
             AND COALESCE(st.is_refund, false) = false
           WHERE bc.batch_id = $1
-          GROUP BY ct.coin_type_id, ct.name, ct.is_ungraded, bc.total_contributed, bc.total_sold, bc.cost_per_coin, bc.grading_cost_per_coin
+          GROUP BY ct.coin_type_id, ct.name, ct.is_ungraded, bc.total_contributed, bc.cost_per_coin, bc.grading_cost_per_coin
           ORDER BY ct.name
         `, [batchId]);
         return res.json(result.rows);
