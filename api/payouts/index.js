@@ -201,7 +201,7 @@ export default async function handler(req, res) {
 
       // Get batch totals for payout overview
       if (action === 'batchTotals') {
-        // First get raw aggregates per batch
+        // Get basic batch info
         const result = await query(`
           SELECT 
             b.batch_id,
@@ -210,43 +210,45 @@ export default async function handler(req, res) {
             (SELECT COUNT(DISTINCT user_id) FROM user_contributions WHERE batch_id = b.batch_id) as contributor_count,
             (SELECT COALESCE(SUM(total_contributed), 0) FROM batch_coins WHERE batch_id = b.batch_id) as total_coins,
             COALESCE(SUM(st.quantity_sold), 0) as total_sold,
-            COALESCE(SUM(st.total_payout), 0) as total_ebay_payout,
-            COALESCE(SUM(st.coin_cost), 0) as total_coin_cost
+            COALESCE(SUM(st.total_payout), 0) as total_ebay_payout
           FROM batches b
           LEFT JOIN sales_transactions st ON b.batch_id = st.batch_id AND COALESCE(st.is_refund, false) = false
           GROUP BY b.batch_id, b.batch_name, b.ship_date
           ORDER BY b.ship_date DESC NULLS LAST
         `);
         
-        // For each batch, calculate profit using batch_coins grading costs
+        // For each batch, calculate using CURRENT batch_coins costs (matching Sales page)
         const batchesWithCalcs = await Promise.all(result.rows.map(async (batch) => {
-          // Get grading costs per coin type for this batch
-          const gradingResult = await query(`
+          // Get sales grouped by coin type, with current batch_coins costs
+          const salesResult = await query(`
             SELECT 
               st.coin_type_id,
               SUM(st.quantity_sold) as qty,
               SUM(st.total_payout) as ebay_payout,
-              SUM(st.coin_cost) as coin_cost,
+              COALESCE(bc.cost_per_coin, 0) as cost_per_coin,
               COALESCE(bc.grading_cost_per_coin, 0) as grading_cost_per_coin
             FROM sales_transactions st
             LEFT JOIN batch_coins bc ON bc.batch_id = st.batch_id AND bc.coin_type_id = st.coin_type_id
             WHERE st.batch_id = $1 AND COALESCE(st.is_refund, false) = false
-            GROUP BY st.coin_type_id, bc.grading_cost_per_coin
+            GROUP BY st.coin_type_id, bc.cost_per_coin, bc.grading_cost_per_coin
           `, [batch.batch_id]);
           
-          // Calculate totals using same logic as Sales page
+          // Calculate totals using CURRENT batch_coins values (same as Sales page)
           let totalProfit = 0;
           let totalAdminShare = 0;
           let totalMemberPayout = 0;
           
-          for (const row of gradingResult.rows) {
+          for (const row of salesResult.rows) {
             const ebayPayout = parseFloat(row.ebay_payout) || 0;
-            const coinCost = parseFloat(row.coin_cost) || 0;
             const qty = parseInt(row.qty) || 0;
+            const costPerCoin = parseFloat(row.cost_per_coin) || 0;
             const gradingCostPerCoin = parseFloat(row.grading_cost_per_coin) || 0;
+            
+            // Use current batch_coins values × quantity
+            const totalCoinCost = costPerCoin * qty;
             const totalGradingCost = gradingCostPerCoin * qty;
             
-            const profit = ebayPayout - coinCost - totalGradingCost;
+            const profit = ebayPayout - totalCoinCost - totalGradingCost;
             const adminShare = Math.max(0.33 * profit, 8 * qty);
             const memberPayout = Math.max(0, ebayPayout - totalGradingCost - adminShare);
             
@@ -272,7 +274,7 @@ export default async function handler(req, res) {
         const { batchId } = req.query;
         if (!batchId) return res.status(400).json({ error: 'Batch ID required' });
         
-        // Get raw sales data then calculate on the fly (like Sales page does)
+        // Get raw sales data - use batch_coins for current costs (not stored st.coin_cost)
         const result = await query(`
           SELECT 
             st.coin_type_id,
@@ -282,8 +284,7 @@ export default async function handler(req, res) {
             COALESCE(bc.cost_per_coin, 0) as cost_per_coin,
             COALESCE(bc.grading_cost_per_coin, 0) as grading_cost_per_coin,
             SUM(st.quantity_sold) as sold,
-            SUM(st.total_payout) as ebay_payout,
-            SUM(st.coin_cost) as total_coin_cost
+            SUM(st.total_payout) as ebay_payout
           FROM sales_transactions st
           JOIN coin_types ct ON st.coin_type_id = ct.coin_type_id
           LEFT JOIN batch_coins bc ON bc.batch_id = st.batch_id AND bc.coin_type_id = st.coin_type_id
@@ -292,12 +293,15 @@ export default async function handler(req, res) {
           ORDER BY ct.name
         `, [batchId]);
         
-        // Calculate profit, admin_share, member_payout on the fly (matching Sales page logic)
+        // Calculate using CURRENT batch_coins costs (matching Sales page logic)
         const rows = result.rows.map(row => {
           const ebayPayout = parseFloat(row.ebay_payout) || 0;
-          const totalCoinCost = parseFloat(row.total_coin_cost) || 0;
           const sold = parseInt(row.sold) || 0;
+          const costPerCoin = parseFloat(row.cost_per_coin) || 0;
           const gradingCostPerCoin = parseFloat(row.grading_cost_per_coin) || 0;
+          
+          // Use current batch_coins values (same as Sales page)
+          const totalCoinCost = costPerCoin * sold;
           const totalGradingCost = gradingCostPerCoin * sold;
           
           const profit = ebayPayout - totalCoinCost - totalGradingCost;
