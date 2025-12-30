@@ -278,8 +278,27 @@ export default function Settings() {
     { id: 'coins', label: 'Coin Types', icon: Coins },
     { id: 'profile', label: 'Profile', icon: User },
     { id: 'security', label: 'Security', icon: Lock },
-    { id: 'integrations', label: 'Integrations', icon: Zap }
+    { id: 'integrations', label: 'Integrations', icon: Zap },
+    { id: 'database', label: 'Database', icon: Database }
   ]
+
+  const [migrationStatus, setMigrationStatus] = useState(null)
+  const [runningMigration, setRunningMigration] = useState(false)
+
+  const runProfitMigration = async () => {
+    if (!confirm('This will recalculate profit, admin share, and member payout for ALL sales to include grading cost. Continue?')) return
+    
+    setRunningMigration(true)
+    setMigrationStatus(null)
+    try {
+      const res = await api.post('/transactions', { action: 'fixProfitCalculations' })
+      setMigrationStatus({ type: 'success', ...res.data })
+    } catch (error) {
+      setMigrationStatus({ type: 'error', message: error.response?.data?.error || error.message })
+    } finally {
+      setRunningMigration(false)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -522,6 +541,57 @@ export default function Settings() {
                   </p>
                   <button className="btn btn-secondary" disabled>
                     Configure (Coming Soon)
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'database' && (
+            <div className="card p-6">
+              <h2 className="text-lg font-semibold mb-6">Database Maintenance</h2>
+              
+              <div className="space-y-6">
+                {/* Profit Calculation Fix */}
+                <div className="p-4 border rounded-lg">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
+                        <Database className="w-5 h-5 text-emerald-600" />
+                      </div>
+                      <div>
+                        <h3 className="font-medium">Fix Profit Calculations</h3>
+                        <p className="text-sm text-slate-500">Recalculate profit to include grading cost</p>
+                      </div>
+                    </div>
+                  </div>
+                  <p className="text-sm text-slate-600 mb-3">
+                    This migration updates all sales to calculate profit correctly:
+                    <br />
+                    <code className="text-xs bg-slate-100 px-1 rounded">Profit = eBay Payout - Coin Cost - Grading Cost</code>
+                  </p>
+                  
+                  {migrationStatus && (
+                    <div className={`mb-3 p-3 rounded-lg text-sm ${
+                      migrationStatus.type === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
+                    }`}>
+                      {migrationStatus.type === 'success' ? (
+                        <>
+                          <p className="font-medium">✓ {migrationStatus.message}</p>
+                          <p className="text-xs mt-1">Updated: {migrationStatus.updated} | Unchanged: {migrationStatus.unchanged}</p>
+                        </>
+                      ) : (
+                        <p>Error: {migrationStatus.message}</p>
+                      )}
+                    </div>
+                  )}
+                  
+                  <button 
+                    onClick={runProfitMigration}
+                    disabled={runningMigration}
+                    className="btn btn-primary"
+                  >
+                    {runningMigration ? 'Running...' : 'Run Migration'}
                   </button>
                 </div>
               </div>

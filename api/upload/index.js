@@ -183,12 +183,13 @@ export default async function handler(req, res) {
         const coinType = titleToCoinType[tx.itemTitle];
         const coinTypeId = coinType?.coin_type_id || null;
         
-        // Get cost_per_coin from batch_coins (use oldest batch with available inventory - FIFO)
+        // Get cost_per_coin and grading_cost_per_coin from batch_coins (use oldest batch with available inventory - FIFO)
         let coinCost = 0;
+        let gradingCost = 0;
         let batchId = null;
         if (coinTypeId) {
           const batchCoin = await query(`
-            SELECT bc.batch_id, bc.cost_per_coin, bc.total_contributed, bc.total_sold
+            SELECT bc.batch_id, bc.cost_per_coin, bc.grading_cost_per_coin, bc.total_contributed, bc.total_sold
             FROM batch_coins bc
             JOIN batches b ON bc.batch_id = b.batch_id
             WHERE bc.coin_type_id = $1 
@@ -200,6 +201,7 @@ export default async function handler(req, res) {
           
           if (batchCoin.rows.length > 0) {
             coinCost = parseFloat(batchCoin.rows[0].cost_per_coin) || 0;
+            gradingCost = parseFloat(batchCoin.rows[0].grading_cost_per_coin) || 0;
             batchId = batchCoin.rows[0].batch_id;
           }
         }
@@ -214,11 +216,12 @@ export default async function handler(req, res) {
         // totalPayout from frontend already has shipping subtracted
         const totalPayout = parseFloat(tx.totalPayout) || (salePrice - ebayFee - advertisingFee - shippingCost);
         const totalCoinCost = coinCost * quantity;
+        const totalGradingCost = gradingCost * quantity;
         
-        // Profit = what we received after all costs (including shipping)
-        const profit = totalPayout - totalCoinCost;
-        const profitShare = profit > 0 ? Math.max(0.33 * profit, 8) : 0;
-        const payout = profit - profitShare;
+        // Profit = eBay Payout - Coin Cost - Grading Cost
+        const profit = totalPayout - totalCoinCost - totalGradingCost;
+        const profitShare = Math.max(0.33 * profit, 8 * quantity);
+        const payout = totalPayout - totalGradingCost - profitShare;
         const profitMargin = salePrice > 0 ? (profit / salePrice) : 0;
 
         // Mark if this order was refunded
@@ -229,9 +232,9 @@ export default async function handler(req, res) {
           INSERT INTO sales_transactions (
             batch_id, coin_type_id, listing_id, order_number, item_title, sale_date,
             sale_price, ebay_fee, advertising_fee, shipping_cost, total_payout,
-            coin_cost, profit, profit_share, payout, profit_margin,
+            coin_cost, grading_cost, profit, profit_share, payout, profit_margin,
             grade, quantity_sold, imported_from, is_refunded
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
         `, [
           batchId,
           coinTypeId,
@@ -245,6 +248,7 @@ export default async function handler(req, res) {
           shippingCost,
           totalPayout,
           totalCoinCost,
+          totalGradingCost,
           profit,
           profitShare,
           payout,

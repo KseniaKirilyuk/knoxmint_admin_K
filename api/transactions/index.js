@@ -299,9 +299,69 @@ export default async function handler(req, res) {
       return res.json({ success: true, updated });
     }
 
-    // Create a new sale (for testing)
+    // Create a new sale (for testing) or run migrations
     if (req.method === 'POST') {
       if (user.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
+      
+      const { action } = req.body;
+      
+      // Migration: Fix profit calculations to include grading cost
+      if (action === 'fixProfitCalculations') {
+        // Step 1: Add grading_cost column if not exists
+        await query(`ALTER TABLE sales_transactions ADD COLUMN IF NOT EXISTS grading_cost DECIMAL(10,2) DEFAULT 0`);
+        
+        // Step 2: Get all sales with their batch grading costs
+        const salesResult = await query(`
+          SELECT 
+            st.transaction_id,
+            st.batch_id,
+            st.coin_type_id,
+            st.total_payout,
+            st.coin_cost,
+            st.quantity_sold,
+            st.profit as old_profit,
+            COALESCE(bc.grading_cost_per_coin, 0) as grading_cost_per_coin
+          FROM sales_transactions st
+          LEFT JOIN batch_coins bc ON st.batch_id = bc.batch_id AND st.coin_type_id = bc.coin_type_id
+          WHERE COALESCE(st.is_refund, false) = false
+        `);
+        
+        // Step 3: Recalculate each sale
+        let updated = 0;
+        let unchanged = 0;
+        
+        for (const sale of salesResult.rows) {
+          const totalPayout = parseFloat(sale.total_payout) || 0;
+          const coinCost = parseFloat(sale.coin_cost) || 0;
+          const gradingCostPerCoin = parseFloat(sale.grading_cost_per_coin) || 0;
+          const quantity = parseInt(sale.quantity_sold) || 1;
+          
+          const totalGradingCost = gradingCostPerCoin * quantity;
+          const newProfit = totalPayout - coinCost - totalGradingCost;
+          const newProfitShare = Math.max(0.33 * newProfit, 8 * quantity);
+          const newPayout = totalPayout - totalGradingCost - newProfitShare;
+          const newProfitMargin = totalPayout > 0 ? (newProfit / totalPayout) : 0;
+          
+          const oldProfit = parseFloat(sale.old_profit) || 0;
+          if (Math.abs(newProfit - oldProfit) > 0.01) {
+            await query(`
+              UPDATE sales_transactions 
+              SET grading_cost = $1, profit = $2, profit_share = $3, payout = $4, profit_margin = $5
+              WHERE transaction_id = $6
+            `, [totalGradingCost, newProfit, newProfitShare, newPayout, newProfitMargin, sale.transaction_id]);
+            updated++;
+          } else {
+            unchanged++;
+          }
+        }
+        
+        return res.json({ 
+          success: true, 
+          message: `Migration complete. Updated: ${updated}, Unchanged: ${unchanged}`,
+          updated,
+          unchanged
+        });
+      }
       
       const { 
         batchId, 
