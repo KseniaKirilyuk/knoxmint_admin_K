@@ -678,27 +678,44 @@ export default function Sales() {
                               
                               {/* Payout Calculation */}
                               <div className="bg-slate-50 rounded-lg p-3 space-y-2">
+                                {/* Step 1: Calculate Profit */}
                                 <div className="flex justify-between text-sm">
                                   <span className="text-slate-600">eBay Payout</span>
                                   <span className="font-medium">{formatCurrency(ebayPayout)}</span>
                                 </div>
                                 <div className="flex justify-between text-sm">
+                                  <span className="text-slate-600">− Coin Cost</span>
+                                  <span className="text-red-600">−{formatCurrency(totalCoinCost)}</span>
+                                </div>
+                                <div className="flex justify-between text-sm">
                                   <span className="text-slate-600">− Grading Cost</span>
                                   <span className="text-red-600">−{formatCurrency(totalGradingCost)}</span>
                                 </div>
-                                <div className="flex justify-between text-sm">
-                                  <span className="text-slate-600">− Admin Share (33%)</span>
-                                  <span className="text-red-600">−{formatCurrency(adminShare)}</span>
-                                </div>
-                                <div className="text-[10px] text-slate-400">
-                                  max(33% × {formatCurrency(profit)} profit, {formatCurrency(8 * qty)} min)
+                                <div className="flex justify-between text-sm font-medium border-t pt-2">
+                                  <span className="text-slate-700">= Profit</span>
+                                  <span className={profit >= 0 ? 'text-emerald-600' : 'text-red-600'}>{formatCurrency(profit)}</span>
                                 </div>
                                 
-                                <div className="border-t pt-2 mt-2 flex justify-between text-sm font-semibold">
-                                  <span className="text-slate-900">Member Payout</span>
-                                  <span className={`text-lg ${memberPayout > 0 ? 'text-emerald-600' : 'text-slate-500'}`}>
-                                    {formatCurrency(memberPayout)}
-                                  </span>
+                                {/* Step 2: Admin Share */}
+                                <div className="flex justify-between text-sm pt-2">
+                                  <span className="text-slate-600">Admin Share</span>
+                                  <span className="text-amber-600">−{formatCurrency(adminShare)}</span>
+                                </div>
+                                <div className="text-[10px] text-slate-400 pl-2">
+                                  max(33% × {formatCurrency(profit)}, {formatCurrency(8 * qty)} min)
+                                </div>
+                                
+                                {/* Step 3: Member Payout */}
+                                <div className="border-t pt-2 mt-2">
+                                  <div className="text-[10px] text-slate-400 mb-1">
+                                    {formatCurrency(ebayPayout)} − {formatCurrency(totalGradingCost)} − {formatCurrency(adminShare)}
+                                  </div>
+                                  <div className="flex justify-between text-sm font-semibold">
+                                    <span className="text-slate-900">Member Payout</span>
+                                    <span className={`text-lg ${memberPayout > 0 ? 'text-emerald-600' : 'text-slate-500'}`}>
+                                      {formatCurrency(memberPayout)}
+                                    </span>
+                                  </div>
                                 </div>
                               </div>
                             </div>
