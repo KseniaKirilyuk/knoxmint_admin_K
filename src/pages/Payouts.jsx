@@ -1,14 +1,17 @@
 import React, { useState, useEffect } from 'react'
-import { DollarSign, CheckCircle, Clock, ChevronDown, ChevronRight, Users, Download, Pencil, Trash2 } from 'lucide-react'
+import { DollarSign, CheckCircle, Clock, ChevronDown, ChevronRight, Users, Download, Pencil, Trash2, Package, TrendingUp } from 'lucide-react'
 import api from '../lib/api'
 
 export default function Payouts() {
   const [memberTotals, setMemberTotals] = useState([])
   const [memberBreakdowns, setMemberBreakdowns] = useState({})
+  const [batchTotals, setBatchTotals] = useState([])
+  const [batchBreakdowns, setBatchBreakdowns] = useState({})
   const [paymentHistory, setPaymentHistory] = useState([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('owed')
+  const [activeTab, setActiveTab] = useState('batches')
   const [expandedMembers, setExpandedMembers] = useState({})
+  const [expandedBatches, setExpandedBatches] = useState({})
   const [payModal, setPayModal] = useState(null)
   const [paymentForm, setPaymentForm] = useState({ amount: '', method: 'Zelle', reference: '', notes: '' })
   const [editModal, setEditModal] = useState(null)
@@ -21,12 +24,14 @@ export default function Payouts() {
   const fetchData = async () => {
     setLoading(true)
     try {
-      const [totalsRes, historyRes] = await Promise.all([
+      const [totalsRes, historyRes, batchRes] = await Promise.all([
         api.get('/payouts?action=memberTotals'),
-        api.get('/payouts?action=history')
+        api.get('/payouts?action=history'),
+        api.get('/payouts?action=batchTotals')
       ])
       setMemberTotals(totalsRes.data)
       setPaymentHistory(historyRes.data)
+      setBatchTotals(batchRes.data)
     } catch (error) {
       console.error('Error fetching payout data:', error)
     } finally {
@@ -38,7 +43,6 @@ export default function Payouts() {
     if (expandedMembers[userId]) {
       setExpandedMembers(prev => ({ ...prev, [userId]: false }))
     } else {
-      // Fetch breakdown if not already loaded
       if (!memberBreakdowns[userId]) {
         try {
           const res = await api.get(`/payouts?action=memberBreakdown&userId=${userId}`)
@@ -48,6 +52,22 @@ export default function Payouts() {
         }
       }
       setExpandedMembers(prev => ({ ...prev, [userId]: true }))
+    }
+  }
+
+  const toggleBatch = async (batchId) => {
+    if (expandedBatches[batchId]) {
+      setExpandedBatches(prev => ({ ...prev, [batchId]: false }))
+    } else {
+      if (!batchBreakdowns[batchId]) {
+        try {
+          const res = await api.get(`/payouts?action=batchBreakdown&batchId=${batchId}`)
+          setBatchBreakdowns(prev => ({ ...prev, [batchId]: res.data }))
+        } catch (error) {
+          console.error('Error fetching batch breakdown:', error)
+        }
+      }
+      setExpandedBatches(prev => ({ ...prev, [batchId]: true }))
     }
   }
 
@@ -284,14 +304,24 @@ export default function Payouts() {
       <div className="border-b border-slate-200">
         <nav className="flex gap-8">
           <button
-            onClick={() => setActiveTab('owed')}
+            onClick={() => setActiveTab('batches')}
             className={`pb-4 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === 'owed'
+              activeTab === 'batches'
                 ? 'border-knox-600 text-knox-600'
                 : 'border-transparent text-slate-500 hover:text-slate-700'
             }`}
           >
-            Member Balances
+            By Batch
+          </button>
+          <button
+            onClick={() => setActiveTab('members')}
+            className={`pb-4 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'members'
+                ? 'border-knox-600 text-knox-600'
+                : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            By Member
           </button>
           <button
             onClick={() => setActiveTab('history')}
@@ -311,7 +341,151 @@ export default function Payouts() {
         <div className="flex items-center justify-center h-64">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-knox-600"></div>
         </div>
-      ) : activeTab === 'owed' ? (
+      ) : activeTab === 'batches' ? (
+        /* By Batch View */
+        <div className="space-y-4">
+          {batchTotals.length === 0 ? (
+            <div className="card p-8 text-center text-slate-500">
+              No batch data found. Create batches and add sales first.
+            </div>
+          ) : (
+            batchTotals.map((batch) => {
+              const isExpanded = expandedBatches[batch.batch_id]
+              const breakdown = batchBreakdowns[batch.batch_id] || []
+              const revenue = parseFloat(batch.total_revenue) || 0
+              const profit = parseFloat(batch.total_profit) || 0
+              const adminShare = parseFloat(batch.total_admin_share) || 0
+              const memberPayout = parseFloat(batch.total_member_payout) || 0
+              const totalSold = parseInt(batch.total_sold) || 0
+              const totalCoins = parseInt(batch.total_coins) || 0
+              
+              return (
+                <div key={batch.batch_id} className="card overflow-hidden">
+                  {/* Batch Header */}
+                  <div 
+                    className={`p-4 cursor-pointer hover:bg-slate-50 ${isExpanded ? 'bg-slate-50 border-b' : ''}`}
+                    onClick={() => toggleBatch(batch.batch_id)}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${isExpanded ? '' : '-rotate-90'}`} />
+                        <div>
+                          <h3 className="font-semibold text-slate-900">{batch.batch_name}</h3>
+                          <p className="text-xs text-slate-500">
+                            {batch.ship_date?.split('T')[0] || 'No ship date'} • {batch.contributor_count} contributors
+                          </p>
+                        </div>
+                      </div>
+                      
+                      {/* Summary Stats */}
+                      <div className="flex items-center gap-6 text-sm">
+                        <div className="text-center">
+                          <p className="text-slate-500 text-xs">Sold</p>
+                          <p className="font-semibold">{totalSold} / {totalCoins}</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-slate-500 text-xs">Revenue</p>
+                          <p className="font-semibold">{formatCurrency(revenue)}</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-slate-500 text-xs">Profit</p>
+                          <p className={`font-semibold ${profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                            {formatCurrency(profit)}
+                          </p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-slate-500 text-xs">Admin</p>
+                          <p className="font-semibold text-amber-600">{formatCurrency(adminShare)}</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-slate-500 text-xs">Member $</p>
+                          <p className="font-semibold text-emerald-600">{formatCurrency(memberPayout)}</p>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Progress Bar */}
+                    <div className="mt-3 ml-8">
+                      <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-emerald-500 rounded-full transition-all"
+                          style={{ width: `${totalCoins > 0 ? (totalSold / totalCoins) * 100 : 0}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-slate-400 mt-1">
+                        {totalCoins > 0 ? Math.round((totalSold / totalCoins) * 100) : 0}% sold
+                      </p>
+                    </div>
+                  </div>
+                  
+                  {/* Expanded Breakdown */}
+                  {isExpanded && (
+                    <div className="bg-slate-50/50">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-xs text-slate-500 border-b">
+                            <th className="px-4 py-2 text-left">Coin Type</th>
+                            <th className="px-4 py-2 text-right">Pool</th>
+                            <th className="px-4 py-2 text-right">Sold</th>
+                            <th className="px-4 py-2 text-right">Cost/Coin</th>
+                            <th className="px-4 py-2 text-right">Grading</th>
+                            <th className="px-4 py-2 text-right">Revenue</th>
+                            <th className="px-4 py-2 text-right">Profit</th>
+                            <th className="px-4 py-2 text-right">Admin</th>
+                            <th className="px-4 py-2 text-right">Member $</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {breakdown.length === 0 ? (
+                            <tr>
+                              <td colSpan={9} className="px-4 py-4 text-center text-slate-400">
+                                Loading...
+                              </td>
+                            </tr>
+                          ) : (
+                            breakdown.map((row, idx) => {
+                              const rowProfit = parseFloat(row.profit) || 0
+                              const isUngraded = row.is_ungraded
+                              return (
+                                <tr key={idx} className="border-b border-slate-100 hover:bg-white">
+                                  <td className="px-4 py-2">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-slate-700">{row.coin_type_name}</span>
+                                      {isUngraded ? (
+                                        <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-[10px] font-medium">UG</span>
+                                      ) : (
+                                        <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded text-[10px] font-medium">GR</span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-2 text-right">{row.pool || 0}</td>
+                                  <td className="px-4 py-2 text-right">
+                                    <span className={parseInt(row.sold) > 0 ? 'text-emerald-600' : 'text-slate-400'}>
+                                      {row.sold || 0}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-2 text-right">{formatCurrency(row.cost_per_coin)}</td>
+                                  <td className="px-4 py-2 text-right">{formatCurrency(row.grading_cost_per_coin)}</td>
+                                  <td className="px-4 py-2 text-right">{formatCurrency(row.revenue)}</td>
+                                  <td className={`px-4 py-2 text-right font-medium ${rowProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                    {formatCurrency(row.profit)}
+                                  </td>
+                                  <td className="px-4 py-2 text-right text-amber-600">{formatCurrency(row.admin_share)}</td>
+                                  <td className="px-4 py-2 text-right font-medium text-emerald-600">{formatCurrency(row.member_payout)}</td>
+                                </tr>
+                              )
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )
+            })
+          )}
+        </div>
+      ) : activeTab === 'members' ? (
         <div className="card overflow-hidden">
           <table className="w-full">
             <thead>
