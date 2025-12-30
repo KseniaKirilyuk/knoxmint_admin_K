@@ -230,9 +230,11 @@ export default function Payouts() {
     a.click()
   }
 
-  const totalOwed = memberTotals.reduce((sum, m) => sum + parseFloat(m.total_earned || 0), 0)
+  const totalMembersPayout = memberTotals.reduce((sum, m) => sum + parseFloat(m.total_earned || 0), 0)
   const totalUnpaid = memberTotals.reduce((sum, m) => sum + parseFloat(m.balance || 0), 0)
   const totalPaid = memberTotals.reduce((sum, m) => sum + parseFloat(m.total_paid || 0), 0)
+  const totalMembersProfit = batchTotals.reduce((sum, b) => sum + parseFloat(b.total_member_profit || 0), 0)
+  const totalAdminShare = batchTotals.reduce((sum, b) => sum + parseFloat(b.total_admin_share || 0), 0)
 
   const formatCurrency = (val) => {
     const num = parseFloat(val) || 0
@@ -253,15 +255,15 @@ export default function Payouts() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <div className="card p-5">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-knox-100 rounded-lg">
               <DollarSign className="w-5 h-5 text-knox-600" />
             </div>
             <div>
-              <p className="text-xs text-slate-500">Total Earned</p>
-              <p className="text-xl font-bold text-slate-900">{formatCurrency(totalOwed)}</p>
+              <p className="text-xs text-slate-500">Members Payouts</p>
+              <p className="text-xl font-bold text-slate-900">{formatCurrency(totalMembersPayout)}</p>
             </div>
           </div>
         </div>
@@ -289,12 +291,23 @@ export default function Payouts() {
         </div>
         <div className="card p-5">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-slate-100 rounded-lg">
-              <Users className="w-5 h-5 text-slate-600" />
+            <div className="p-2 bg-blue-100 rounded-lg">
+              <TrendingUp className="w-5 h-5 text-blue-600" />
             </div>
             <div>
-              <p className="text-xs text-slate-500">Members</p>
-              <p className="text-xl font-bold text-slate-900">{memberTotals.length}</p>
+              <p className="text-xs text-slate-500">Members Profit</p>
+              <p className="text-xl font-bold text-blue-600">{formatCurrency(totalMembersProfit)}</p>
+            </div>
+          </div>
+        </div>
+        <div className="card p-5">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-purple-100 rounded-lg">
+              <DollarSign className="w-5 h-5 text-purple-600" />
+            </div>
+            <div>
+              <p className="text-xs text-slate-500">Admin Share</p>
+              <p className="text-xl font-bold text-purple-600">{formatCurrency(totalAdminShare)}</p>
             </div>
           </div>
         </div>
@@ -395,13 +408,13 @@ export default function Payouts() {
                           <p className="font-semibold text-amber-600">{formatCurrency(adminShare)}</p>
                         </div>
                         <div className="text-center">
-                          <p className="text-slate-500 text-xs">Member Profit</p>
+                          <p className="text-slate-500 text-xs">Members Profit</p>
                           <p className={`font-semibold ${memberProfit >= 0 ? 'text-slate-700' : 'text-red-600'}`}>
                             {formatCurrency(memberProfit)}
                           </p>
                         </div>
                         <div className="text-center">
-                          <p className="text-slate-500 text-xs">Member Payout</p>
+                          <p className="text-slate-500 text-xs">Members Payout</p>
                           <p className="font-semibold text-emerald-600">{formatCurrency(memberPayout)}</p>
                         </div>
                       </div>
@@ -428,13 +441,13 @@ export default function Payouts() {
                         <thead>
                           <tr className="text-xs text-slate-500 border-b">
                             <th className="px-4 py-2 text-left">Coin Type</th>
-                            <th className="px-4 py-2 text-right">Pool</th>
+                            <th className="px-4 py-2 text-right">Contrib</th>
                             <th className="px-4 py-2 text-right">Sold</th>
                             <th className="px-4 py-2 text-right">eBay Payout</th>
                             <th className="px-4 py-2 text-right">Profit</th>
                             <th className="px-4 py-2 text-right">Admin Share</th>
-                            <th className="px-4 py-2 text-right">Member Profit</th>
-                            <th className="px-4 py-2 text-right">Member Payout</th>
+                            <th className="px-4 py-2 text-right">Members Profit</th>
+                            <th className="px-4 py-2 text-right">Members Payout</th>
                           </tr>
                         </thead>
                         <tbody>
