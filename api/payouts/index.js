@@ -168,6 +168,7 @@ export default async function handler(req, res) {
             total_sold: sold,
             share_pct: (sharePct * 100).toFixed(1),
             batch_profit: batchProfit.toFixed(2),
+            batch_members_payout: batchMemberPayout.toFixed(2),
             member_payout: memberPayout.toFixed(2)
           };
         });

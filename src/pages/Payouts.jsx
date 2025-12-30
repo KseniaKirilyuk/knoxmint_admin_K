@@ -595,12 +595,14 @@ export default function Payouts() {
                                         <th className="px-4 py-2 text-right font-medium text-slate-600">Sold</th>
                                         <th className="px-4 py-2 text-right font-medium text-slate-600">Share %</th>
                                         <th className="px-4 py-2 text-right font-medium text-slate-600">Batch Profit</th>
+                                        <th className="px-4 py-2 text-right font-medium text-slate-600">Batch Members Payout</th>
                                         <th className="px-4 py-2 text-right font-medium text-slate-600">Member Payout</th>
                                       </tr>
                                     </thead>
                                     <tbody>
                                       {breakdown.map((row, idx) => {
                                         const batchProfit = parseFloat(row.batch_profit) || 0
+                                        const batchMembersPayout = parseFloat(row.batch_members_payout) || 0
                                         const memberPayout = parseFloat(row.member_payout) || 0
                                         const isNegativeProfit = batchProfit < 0
                                         const noSales = parseInt(row.total_sold) === 0
@@ -651,6 +653,13 @@ export default function Payouts() {
                                                 </span>
                                               )}
                                             </td>
+                                            <td className="px-4 py-2 text-right">
+                                              {noSales ? (
+                                                <span className="text-slate-400">—</span>
+                                              ) : (
+                                                <span className="text-emerald-600">{formatCurrency(batchMembersPayout)}</span>
+                                              )}
+                                            </td>
                                             <td className="px-4 py-2 text-right font-medium">
                                               {noSales ? (
                                                 <span className="text-slate-400">—</span>
@@ -667,7 +676,7 @@ export default function Payouts() {
                                     </tbody>
                                     <tfoot>
                                       <tr className="border-t bg-slate-50">
-                                        <td colSpan={6} className="px-4 py-2 text-right font-medium text-slate-600">
+                                        <td colSpan={7} className="px-4 py-2 text-right font-medium text-slate-600">
                                           Total Member Payout:
                                         </td>
                                         <td className="px-4 py-2 text-right font-bold text-emerald-600">
