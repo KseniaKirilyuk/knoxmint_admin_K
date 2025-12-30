@@ -638,77 +638,67 @@ export default function Sales() {
                       
                       {/* Expanded Detail Row */}
                       {isExpanded && (
-                        <tr className="bg-slate-50/80">
-                          <td colSpan={13} className="px-4 py-3 border-b">
-                            <div className="flex gap-8">
-                              {/* Left: Item Info */}
-                              <div className="flex-1">
-                                <p className="text-xs text-slate-500 mb-1">Item Title</p>
-                                <p className="text-sm font-medium text-slate-900">{tx.item_title || '-'}</p>
-                                {tx.coin_type_name && (
-                                  <p className="text-xs text-knox-600 mt-1">Type: {tx.coin_type_name}</p>
-                                )}
-                                {tx.grade && (
-                                  <p className="text-xs text-slate-500 mt-1">Grade: {tx.grade}</p>
+                        <tr className="bg-slate-50">
+                          <td colSpan={13} className="px-6 py-4 border-b">
+                            <div className="max-w-lg mx-auto bg-white rounded-lg border shadow-sm p-4">
+                              <div className="flex items-center justify-between mb-3 pb-2 border-b">
+                                <span className="text-sm font-semibold text-slate-800">Calculation Breakdown</span>
+                                {tx.batch_name && (
+                                  <span className="text-xs px-2 py-1 bg-slate-100 text-slate-600 rounded">
+                                    {tx.batch_name}
+                                  </span>
                                 )}
                               </div>
                               
-                              {/* Right: Calculation Breakdown */}
-                              <div className="w-96 bg-white rounded-lg border p-3">
-                                <p className="text-xs font-semibold text-slate-700 mb-2 pb-2 border-b">
-                                  Calculation Breakdown
-                                  {tx.batch_name && <span className="font-normal text-slate-500 ml-2">from {tx.batch_name}</span>}
-                                </p>
+                              {/* Costs Table */}
+                              <table className="w-full text-sm mb-3">
+                                <thead>
+                                  <tr className="text-xs text-slate-500">
+                                    <th className="text-left pb-1"></th>
+                                    <th className="text-right pb-1">Per Coin</th>
+                                    <th className="text-right pb-1">Qty</th>
+                                    <th className="text-right pb-1">Total</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  <tr>
+                                    <td className="py-1 text-slate-600">Coin Cost</td>
+                                    <td className="py-1 text-right">{formatCurrency(unitCoinCost)}</td>
+                                    <td className="py-1 text-right text-slate-400">×{qty}</td>
+                                    <td className="py-1 text-right font-medium">{formatCurrency(totalCoinCost)}</td>
+                                  </tr>
+                                  <tr>
+                                    <td className="py-1 text-slate-600">Grading Cost</td>
+                                    <td className="py-1 text-right">{formatCurrency(unitGradingCost)}</td>
+                                    <td className="py-1 text-right text-slate-400">×{qty}</td>
+                                    <td className="py-1 text-right font-medium">{formatCurrency(totalGradingCost)}</td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                              
+                              {/* Payout Calculation */}
+                              <div className="bg-slate-50 rounded-lg p-3 space-y-2">
+                                <div className="flex justify-between text-sm">
+                                  <span className="text-slate-600">eBay Payout</span>
+                                  <span className="font-medium">{formatCurrency(ebayPayout)}</span>
+                                </div>
+                                <div className="flex justify-between text-sm">
+                                  <span className="text-slate-600">− Grading Cost</span>
+                                  <span className="text-red-600">−{formatCurrency(totalGradingCost)}</span>
+                                </div>
+                                <div className="flex justify-between text-sm">
+                                  <span className="text-slate-600">− Admin Share (33%)</span>
+                                  <span className="text-red-600">−{formatCurrency(adminShare)}</span>
+                                </div>
+                                <div className="text-[10px] text-slate-400">
+                                  max(33% × {formatCurrency(profit)} profit, {formatCurrency(8 * qty)} min)
+                                </div>
                                 
-                                <div className="space-y-1 text-xs">
-                                  {/* Per Coin Costs */}
-                                  <div className="grid grid-cols-4 gap-2 text-slate-600">
-                                    <span></span>
-                                    <span className="text-right">Per Coin</span>
-                                    <span className="text-right">×{qty}</span>
-                                    <span className="text-right">Total</span>
-                                  </div>
-                                  <div className="grid grid-cols-4 gap-2">
-                                    <span className="text-slate-600">Coin Cost</span>
-                                    <span className="text-right">{formatCurrency(unitCoinCost)}</span>
-                                    <span className="text-right text-slate-400">×{qty}</span>
-                                    <span className="text-right">{formatCurrency(totalCoinCost)}</span>
-                                  </div>
-                                  <div className="grid grid-cols-4 gap-2">
-                                    <span className="text-slate-600">Grading</span>
-                                    <span className="text-right">{formatCurrency(unitGradingCost)}</span>
-                                    <span className="text-right text-slate-400">×{qty}</span>
-                                    <span className="text-right">{formatCurrency(totalGradingCost)}</span>
-                                  </div>
-                                  
-                                  <div className="border-t my-2"></div>
-                                  
-                                  {/* Calculation */}
-                                  <div className="grid grid-cols-2 gap-2">
-                                    <span className="text-slate-600">eBay Payout</span>
-                                    <span className="text-right">{formatCurrency(ebayPayout)}</span>
-                                  </div>
-                                  <div className="grid grid-cols-2 gap-2">
-                                    <span className="text-slate-600">− Grading Cost</span>
-                                    <span className="text-right text-red-600">−{formatCurrency(totalGradingCost)}</span>
-                                  </div>
-                                  <div className="grid grid-cols-2 gap-2">
-                                    <span className="text-slate-600">− Admin Share</span>
-                                    <span className="text-right text-red-600">−{formatCurrency(adminShare)}</span>
-                                  </div>
-                                  <div className="text-[10px] text-slate-400 pl-2">
-                                    max(33% × ${profit.toFixed(2)} profit, $8 × {qty})
-                                  </div>
-                                  
-                                  <div className="border-t my-2"></div>
-                                  
-                                  {/* Final Payout */}
-                                  <div className="grid grid-cols-2 gap-2 font-semibold">
-                                    <span className="text-slate-900">Member Payout</span>
-                                    <span className={`text-right ${memberPayout > 0 ? 'text-emerald-600' : 'text-slate-500'}`}>
-                                      {formatCurrency(memberPayout)}
-                                    </span>
-                                  </div>
+                                <div className="border-t pt-2 mt-2 flex justify-between text-sm font-semibold">
+                                  <span className="text-slate-900">Member Payout</span>
+                                  <span className={`text-lg ${memberPayout > 0 ? 'text-emerald-600' : 'text-slate-500'}`}>
+                                    {formatCurrency(memberPayout)}
+                                  </span>
                                 </div>
                               </div>
                             </div>
