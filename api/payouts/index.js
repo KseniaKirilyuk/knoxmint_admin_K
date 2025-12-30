@@ -312,6 +312,7 @@ export default async function handler(req, res) {
             ...row,
             profit: profit.toFixed(2),
             admin_share: adminShare.toFixed(2),
+            member_profit: (profit - adminShare).toFixed(2),
             member_payout: memberPayout.toFixed(2)
           };
         });
