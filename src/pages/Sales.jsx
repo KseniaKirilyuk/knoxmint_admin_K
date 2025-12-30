@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react'
-import { Search, Download, ChevronLeft, ChevronRight, Trash2, TrendingUp, TrendingDown, AlertTriangle, X, Wand2, Edit2, Plus } from 'lucide-react'
+import React, { useState, useEffect, useRef } from 'react'
+import { Search, Download, ChevronLeft, ChevronRight, ChevronDown, Trash2, TrendingUp, TrendingDown, AlertTriangle, X, Wand2, Edit2, Plus } from 'lucide-react'
 import api from '../lib/api'
 
 export default function Sales() {
@@ -9,6 +9,7 @@ export default function Sales() {
   const [loading, setLoading] = useState(true)
   const [summary, setSummary] = useState(null)
   const [unmappedCount, setUnmappedCount] = useState(0)
+  const [expandedRows, setExpandedRows] = useState({})
   const [filters, setFilters] = useState({
     coinTypeId: '',
     startDate: '',
@@ -121,6 +122,13 @@ export default function Sales() {
     } catch (error) {
       alert('Error deleting transaction')
     }
+  }
+
+  const toggleRow = (transactionId) => {
+    setExpandedRows(prev => ({
+      ...prev,
+      [transactionId]: !prev[transactionId]
+    }))
   }
 
   const handleCreateSale = async (e) => {
@@ -513,97 +521,185 @@ export default function Sales() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr>
+              <tr className="bg-slate-50 border-b">
+                <th className="table-header w-8"></th>
                 <th className="table-header">Listing</th>
                 <th className="table-header">Date</th>
                 <th className="table-header text-right">Price</th>
                 <th className="table-header text-right">eBay Fee</th>
                 <th className="table-header text-right">Ads</th>
                 <th className="table-header text-right">Ship</th>
-                <th className="table-header text-right">Payout</th>
-                <th className="table-header text-right">Cost</th>
-                <th className="table-header text-right">Profit</th>
-                <th className="table-header text-right">Share</th>
-                <th className="table-header text-right">Member $</th>
-                <th className="table-header text-right">Margin</th>
-                <th className="table-header">Type</th>
-                <th className="table-header">Grade</th>
+                <th className="table-header text-right">eBay Payout</th>
+                <th className="table-header">Batch</th>
                 <th className="table-header text-center">Qty</th>
+                <th className="table-header text-right">Member Payout</th>
                 <th className="table-header"></th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={16} className="table-cell text-center py-8">
+                  <td colSpan={12} className="table-cell text-center py-8">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-knox-600 mx-auto"></div>
                   </td>
                 </tr>
               ) : transactions.length === 0 ? (
                 <tr>
-                  <td colSpan={16} className="table-cell text-center py-8 text-slate-500">
+                  <td colSpan={12} className="table-cell text-center py-8 text-slate-500">
                     No transactions found. <a href="/upload" className="text-knox-600 hover:underline">Import eBay sales</a>
                   </td>
                 </tr>
               ) : (
                 transactions.map((tx) => {
-                  const profit = parseFloat(tx.profit) || 0
+                  const isExpanded = expandedRows[tx.transaction_id]
                   const isRefund = tx.is_refund
                   const isRefunded = tx.is_refunded
+                  const qty = parseInt(tx.quantity_sold) || 1
+                  const ebayPayout = parseFloat(tx.total_payout) || 0
+                  const unitCoinCost = parseFloat(tx.unit_coin_cost) || 0
+                  const unitGradingCost = parseFloat(tx.unit_grading_cost) || 0
+                  const totalCoinCost = unitCoinCost * qty
+                  const totalGradingCost = unitGradingCost * qty
+                  const profit = ebayPayout - totalGradingCost - totalCoinCost
+                  const adminShare = Math.max(0.33 * profit, 8 * qty)
+                  const memberPayout = Math.max(0, ebayPayout - totalGradingCost - adminShare)
+                  
                   return (
-                    <tr key={tx.transaction_id} className={`hover:bg-slate-50 ${isRefund ? 'bg-red-50' : isRefunded ? 'bg-orange-50' : ''}`}>
-                      <td className="table-cell font-mono text-xs">
-                        {tx.order_number || tx.listing_id || '-'}
-                        {isRefund && <span className="ml-1 px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-[10px] font-medium">REFUND</span>}
-                        {isRefunded && <span className="ml-1 px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded text-[10px] font-medium">REFUNDED</span>}
-                      </td>
-                      <td className="table-cell whitespace-nowrap">
-                        {tx.sale_date?.split('T')[0]}
-                      </td>
-                      <td className="table-cell text-right">{formatCurrency(tx.sale_price)}</td>
-                      <td className="table-cell text-right text-red-600">{formatCurrency(-Math.abs(tx.ebay_fee))}</td>
-                      <td className="table-cell text-right text-red-600">{tx.advertising_fee > 0 ? formatCurrency(-tx.advertising_fee) : '-'}</td>
-                      <td className="table-cell text-right text-amber-600">{tx.shipping_cost > 0 ? formatCurrency(-tx.shipping_cost) : '-'}</td>
-                      <td className="table-cell text-right font-medium">{formatCurrency(tx.total_payout)}</td>
-                      <td className="table-cell text-right">{formatCurrency(tx.coin_cost)}</td>
-                      <td className={`table-cell text-right font-medium ${profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                        {formatCurrency(tx.profit)}
-                      </td>
-                      <td className="table-cell text-right">{formatCurrency(tx.profit_share)}</td>
-                      <td className={`table-cell text-right font-medium ${parseFloat(tx.payout) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                        {formatCurrency(tx.payout)}
-                      </td>
-                      <td className={`table-cell text-right ${profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                        {formatPercent(tx.profit_margin)}
-                      </td>
-                      <td className="table-cell">
-                        {tx.coin_type_name ? (
-                          <span className="px-2 py-0.5 bg-knox-50 text-knox-700 rounded text-xs">
-                            {tx.coin_type_name}
-                          </span>
-                        ) : '-'}
-                      </td>
-                      <td className="table-cell">{tx.grade || '-'}</td>
-                      <td className="table-cell text-center">{tx.quantity_sold}</td>
-                      <td className="table-cell">
-                        <div className="flex items-center gap-1">
-                          <button 
-                            onClick={() => openEditModal(tx)}
-                            className="p-1 text-slate-400 hover:text-knox-600"
-                            title="Edit"
-                          >
-                            <Edit2 className="w-4 h-4" />
-                          </button>
-                          <button 
-                            onClick={() => handleDelete(tx.transaction_id)}
-                            className="p-1 text-slate-400 hover:text-red-600"
-                            title="Delete"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                    <React.Fragment key={tx.transaction_id}>
+                      {/* Main Row */}
+                      <tr 
+                        className={`hover:bg-slate-50 cursor-pointer ${isRefund ? 'bg-red-50' : isRefunded ? 'bg-orange-50' : ''} ${isExpanded ? 'bg-knox-50/50' : ''}`}
+                        onClick={() => toggleRow(tx.transaction_id)}
+                      >
+                        <td className="table-cell">
+                          <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                        </td>
+                        <td className="table-cell font-mono text-xs">
+                          {tx.order_number || tx.listing_id || '-'}
+                          {isRefund && <span className="ml-1 px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-[10px] font-medium">REFUND</span>}
+                          {isRefunded && <span className="ml-1 px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded text-[10px] font-medium">REFUNDED</span>}
+                        </td>
+                        <td className="table-cell whitespace-nowrap">
+                          {tx.sale_date?.split('T')[0]}
+                        </td>
+                        <td className="table-cell text-right">{formatCurrency(tx.sale_price)}</td>
+                        <td className="table-cell text-right text-red-600">{formatCurrency(-Math.abs(tx.ebay_fee))}</td>
+                        <td className="table-cell text-right text-red-600">{tx.advertising_fee > 0 ? formatCurrency(-tx.advertising_fee) : '-'}</td>
+                        <td className="table-cell text-right text-amber-600">{tx.shipping_cost > 0 ? formatCurrency(-tx.shipping_cost) : '-'}</td>
+                        <td className="table-cell text-right font-medium">{formatCurrency(ebayPayout)}</td>
+                        <td className="table-cell">
+                          {tx.batch_name ? (
+                            <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-xs">
+                              {tx.batch_name}
+                            </span>
+                          ) : (
+                            <span className="text-amber-600 text-xs">Not mapped</span>
+                          )}
+                        </td>
+                        <td className="table-cell text-center">{qty}</td>
+                        <td className={`table-cell text-right font-medium ${memberPayout > 0 ? 'text-emerald-600' : 'text-slate-500'}`}>
+                          {formatCurrency(memberPayout)}
+                        </td>
+                        <td className="table-cell" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center gap-1">
+                            <button 
+                              onClick={() => openEditModal(tx)}
+                              className="p-1 text-slate-400 hover:text-knox-600"
+                              title="Edit"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button 
+                              onClick={() => handleDelete(tx.transaction_id)}
+                              className="p-1 text-slate-400 hover:text-red-600"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      
+                      {/* Expanded Detail Row */}
+                      {isExpanded && (
+                        <tr className="bg-slate-50/80">
+                          <td colSpan={12} className="px-4 py-3 border-b">
+                            <div className="flex gap-8">
+                              {/* Left: Item Info */}
+                              <div className="flex-1">
+                                <p className="text-xs text-slate-500 mb-1">Item Title</p>
+                                <p className="text-sm font-medium text-slate-900">{tx.item_title || '-'}</p>
+                                {tx.coin_type_name && (
+                                  <p className="text-xs text-knox-600 mt-1">Type: {tx.coin_type_name}</p>
+                                )}
+                                {tx.grade && (
+                                  <p className="text-xs text-slate-500 mt-1">Grade: {tx.grade}</p>
+                                )}
+                              </div>
+                              
+                              {/* Right: Calculation Breakdown */}
+                              <div className="w-96 bg-white rounded-lg border p-3">
+                                <p className="text-xs font-semibold text-slate-700 mb-2 pb-2 border-b">
+                                  Calculation Breakdown
+                                  {tx.batch_name && <span className="font-normal text-slate-500 ml-2">from {tx.batch_name}</span>}
+                                </p>
+                                
+                                <div className="space-y-1 text-xs">
+                                  {/* Per Coin Costs */}
+                                  <div className="grid grid-cols-4 gap-2 text-slate-600">
+                                    <span></span>
+                                    <span className="text-right">Per Coin</span>
+                                    <span className="text-right">×{qty}</span>
+                                    <span className="text-right">Total</span>
+                                  </div>
+                                  <div className="grid grid-cols-4 gap-2">
+                                    <span className="text-slate-600">Coin Cost</span>
+                                    <span className="text-right">{formatCurrency(unitCoinCost)}</span>
+                                    <span className="text-right text-slate-400">×{qty}</span>
+                                    <span className="text-right">{formatCurrency(totalCoinCost)}</span>
+                                  </div>
+                                  <div className="grid grid-cols-4 gap-2">
+                                    <span className="text-slate-600">Grading</span>
+                                    <span className="text-right">{formatCurrency(unitGradingCost)}</span>
+                                    <span className="text-right text-slate-400">×{qty}</span>
+                                    <span className="text-right">{formatCurrency(totalGradingCost)}</span>
+                                  </div>
+                                  
+                                  <div className="border-t my-2"></div>
+                                  
+                                  {/* Calculation */}
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <span className="text-slate-600">eBay Payout</span>
+                                    <span className="text-right">{formatCurrency(ebayPayout)}</span>
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <span className="text-slate-600">− Grading Cost</span>
+                                    <span className="text-right text-red-600">−{formatCurrency(totalGradingCost)}</span>
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <span className="text-slate-600">− Admin Share</span>
+                                    <span className="text-right text-red-600">−{formatCurrency(adminShare)}</span>
+                                  </div>
+                                  <div className="text-[10px] text-slate-400 pl-2">
+                                    max(33% × ${profit.toFixed(2)} profit, $8 × {qty})
+                                  </div>
+                                  
+                                  <div className="border-t my-2"></div>
+                                  
+                                  {/* Final Payout */}
+                                  <div className="grid grid-cols-2 gap-2 font-semibold">
+                                    <span className="text-slate-900">Member Payout</span>
+                                    <span className={`text-right ${memberPayout > 0 ? 'text-emerald-600' : 'text-slate-500'}`}>
+                                      {formatCurrency(memberPayout)}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   )
                 })
               )}

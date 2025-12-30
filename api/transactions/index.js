@@ -41,10 +41,13 @@ export default async function handler(req, res) {
           st.*,
           b.batch_name,
           ct.name as coin_type_name,
-          ct.short_code
+          ct.short_code,
+          bc.cost_per_coin as unit_coin_cost,
+          bc.grading_cost_per_coin as unit_grading_cost
         FROM sales_transactions st
         LEFT JOIN batches b ON st.batch_id = b.batch_id
         LEFT JOIN coin_types ct ON st.coin_type_id = ct.coin_type_id
+        LEFT JOIN batch_coins bc ON st.batch_id = bc.batch_id AND st.coin_type_id = bc.coin_type_id
         WHERE 1=1
       `;
       const params = [];
