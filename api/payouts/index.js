@@ -201,6 +201,7 @@ export default async function handler(req, res) {
 
       // Get batch totals for payout overview
       if (action === 'batchTotals') {
+        // First get raw aggregates per batch
         const result = await query(`
           SELECT 
             b.batch_id,
@@ -210,16 +211,60 @@ export default async function handler(req, res) {
             (SELECT COALESCE(SUM(total_contributed), 0) FROM batch_coins WHERE batch_id = b.batch_id) as total_coins,
             COALESCE(SUM(st.quantity_sold), 0) as total_sold,
             COALESCE(SUM(st.total_payout), 0) as total_ebay_payout,
-            COALESCE(SUM(st.profit), 0) as total_profit,
-            COALESCE(SUM(st.profit_share), 0) as total_admin_share,
-            COALESCE(SUM(st.profit), 0) - COALESCE(SUM(st.profit_share), 0) as total_member_profit,
-            COALESCE(SUM(st.payout), 0) as total_member_payout
+            COALESCE(SUM(st.coin_cost), 0) as total_coin_cost
           FROM batches b
           LEFT JOIN sales_transactions st ON b.batch_id = st.batch_id AND COALESCE(st.is_refund, false) = false
           GROUP BY b.batch_id, b.batch_name, b.ship_date
           ORDER BY b.ship_date DESC NULLS LAST
         `);
-        return res.json(result.rows);
+        
+        // For each batch, calculate profit using batch_coins grading costs
+        const batchesWithCalcs = await Promise.all(result.rows.map(async (batch) => {
+          // Get grading costs per coin type for this batch
+          const gradingResult = await query(`
+            SELECT 
+              st.coin_type_id,
+              SUM(st.quantity_sold) as qty,
+              SUM(st.total_payout) as ebay_payout,
+              SUM(st.coin_cost) as coin_cost,
+              COALESCE(bc.grading_cost_per_coin, 0) as grading_cost_per_coin
+            FROM sales_transactions st
+            LEFT JOIN batch_coins bc ON bc.batch_id = st.batch_id AND bc.coin_type_id = st.coin_type_id
+            WHERE st.batch_id = $1 AND COALESCE(st.is_refund, false) = false
+            GROUP BY st.coin_type_id, bc.grading_cost_per_coin
+          `, [batch.batch_id]);
+          
+          // Calculate totals using same logic as Sales page
+          let totalProfit = 0;
+          let totalAdminShare = 0;
+          let totalMemberPayout = 0;
+          
+          for (const row of gradingResult.rows) {
+            const ebayPayout = parseFloat(row.ebay_payout) || 0;
+            const coinCost = parseFloat(row.coin_cost) || 0;
+            const qty = parseInt(row.qty) || 0;
+            const gradingCostPerCoin = parseFloat(row.grading_cost_per_coin) || 0;
+            const totalGradingCost = gradingCostPerCoin * qty;
+            
+            const profit = ebayPayout - coinCost - totalGradingCost;
+            const adminShare = Math.max(0.33 * profit, 8 * qty);
+            const memberPayout = Math.max(0, ebayPayout - totalGradingCost - adminShare);
+            
+            totalProfit += profit;
+            totalAdminShare += adminShare;
+            totalMemberPayout += memberPayout;
+          }
+          
+          return {
+            ...batch,
+            total_profit: totalProfit.toFixed(2),
+            total_admin_share: totalAdminShare.toFixed(2),
+            total_member_profit: (totalProfit - totalAdminShare).toFixed(2),
+            total_member_payout: totalMemberPayout.toFixed(2)
+          };
+        }));
+        
+        return res.json(batchesWithCalcs);
       }
 
       // Get breakdown for a specific batch
@@ -227,21 +272,18 @@ export default async function handler(req, res) {
         const { batchId } = req.query;
         if (!batchId) return res.status(400).json({ error: 'Batch ID required' });
         
-        // Query directly from sales_transactions to avoid duplicate counting
+        // Get raw sales data then calculate on the fly (like Sales page does)
         const result = await query(`
           SELECT 
             st.coin_type_id,
             ct.name as coin_type_name,
             ct.is_ungraded,
-            bc.total_contributed as pool,
+            COALESCE(bc.total_contributed, 0) as pool,
+            COALESCE(bc.cost_per_coin, 0) as cost_per_coin,
+            COALESCE(bc.grading_cost_per_coin, 0) as grading_cost_per_coin,
             SUM(st.quantity_sold) as sold,
-            bc.cost_per_coin,
-            bc.grading_cost_per_coin,
             SUM(st.total_payout) as ebay_payout,
-            SUM(st.profit) as profit,
-            SUM(st.profit_share) as admin_share,
-            SUM(st.profit) - SUM(st.profit_share) as member_profit,
-            SUM(st.payout) as member_payout
+            SUM(st.coin_cost) as total_coin_cost
           FROM sales_transactions st
           JOIN coin_types ct ON st.coin_type_id = ct.coin_type_id
           LEFT JOIN batch_coins bc ON bc.batch_id = st.batch_id AND bc.coin_type_id = st.coin_type_id
@@ -249,7 +291,72 @@ export default async function handler(req, res) {
           GROUP BY st.coin_type_id, ct.name, ct.is_ungraded, bc.total_contributed, bc.cost_per_coin, bc.grading_cost_per_coin
           ORDER BY ct.name
         `, [batchId]);
-        return res.json(result.rows);
+        
+        // Calculate profit, admin_share, member_payout on the fly (matching Sales page logic)
+        const rows = result.rows.map(row => {
+          const ebayPayout = parseFloat(row.ebay_payout) || 0;
+          const totalCoinCost = parseFloat(row.total_coin_cost) || 0;
+          const sold = parseInt(row.sold) || 0;
+          const gradingCostPerCoin = parseFloat(row.grading_cost_per_coin) || 0;
+          const totalGradingCost = gradingCostPerCoin * sold;
+          
+          const profit = ebayPayout - totalCoinCost - totalGradingCost;
+          const adminShare = Math.max(0.33 * profit, 8 * sold);
+          const memberPayout = Math.max(0, ebayPayout - totalGradingCost - adminShare);
+          
+          return {
+            ...row,
+            profit: profit.toFixed(2),
+            admin_share: adminShare.toFixed(2),
+            member_payout: memberPayout.toFixed(2)
+          };
+        });
+        
+        return res.json(rows);
+      }
+
+      // Debug: Get raw sales for a batch (no aggregation)
+      if (action === 'debugBatchSales') {
+        const { batchId, coinTypeId } = req.query;
+        if (!batchId) return res.status(400).json({ error: 'Batch ID required' });
+        
+        let sql = `
+          SELECT 
+            st.transaction_id,
+            st.coin_type_id,
+            ct.name as coin_type_name,
+            st.quantity_sold,
+            st.total_payout,
+            st.coin_cost,
+            st.grading_cost,
+            st.profit,
+            st.profit_share,
+            st.payout
+          FROM sales_transactions st
+          JOIN coin_types ct ON st.coin_type_id = ct.coin_type_id
+          WHERE st.batch_id = $1 AND COALESCE(st.is_refund, false) = false
+        `;
+        const params = [batchId];
+        
+        if (coinTypeId) {
+          sql += ` AND st.coin_type_id = $2`;
+          params.push(coinTypeId);
+        }
+        
+        sql += ` ORDER BY st.sale_date`;
+        
+        const result = await query(sql, params);
+        
+        // Also return sums
+        const sums = result.rows.reduce((acc, row) => ({
+          total_payout: acc.total_payout + parseFloat(row.total_payout || 0),
+          profit: acc.profit + parseFloat(row.profit || 0),
+          profit_share: acc.profit_share + parseFloat(row.profit_share || 0),
+          payout: acc.payout + parseFloat(row.payout || 0),
+          count: acc.count + 1
+        }), { total_payout: 0, profit: 0, profit_share: 0, payout: 0, count: 0 });
+        
+        return res.json({ sales: result.rows, sums });
       }
 
       return res.json([]);
