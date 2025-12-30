@@ -638,85 +638,42 @@ export default function Sales() {
                       
                       {/* Expanded Detail Row */}
                       {isExpanded && (
-                        <tr className="bg-slate-50">
-                          <td colSpan={13} className="px-6 py-4 border-b">
-                            <div className="max-w-lg mx-auto bg-white rounded-lg border shadow-sm p-4">
-                              <div className="flex items-center justify-between mb-3 pb-2 border-b">
-                                <span className="text-sm font-semibold text-slate-800">Calculation Breakdown</span>
-                                {tx.batch_name && (
-                                  <span className="text-xs px-2 py-1 bg-slate-100 text-slate-600 rounded">
-                                    {tx.batch_name}
-                                  </span>
-                                )}
+                        <tr className="bg-slate-50 border-b">
+                          <td colSpan={13} className="px-4 py-2">
+                            <div className="flex items-start gap-6 text-xs">
+                              {/* Costs */}
+                              <div className="flex gap-4">
+                                <div>
+                                  <span className="text-slate-500">Coin Cost:</span>
+                                  <span className="ml-1">{formatCurrency(unitCoinCost)} ×{qty} = <strong>{formatCurrency(totalCoinCost)}</strong></span>
+                                </div>
+                                <div>
+                                  <span className="text-slate-500">Grading:</span>
+                                  <span className="ml-1">{formatCurrency(unitGradingCost)} ×{qty} = <strong>{formatCurrency(totalGradingCost)}</strong></span>
+                                </div>
                               </div>
                               
-                              {/* Costs Table */}
-                              <table className="w-full text-sm mb-3">
-                                <thead>
-                                  <tr className="text-xs text-slate-500">
-                                    <th className="text-left pb-1"></th>
-                                    <th className="text-right pb-1">Per Coin</th>
-                                    <th className="text-right pb-1">Qty</th>
-                                    <th className="text-right pb-1">Total</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  <tr>
-                                    <td className="py-1 text-slate-600">Coin Cost</td>
-                                    <td className="py-1 text-right">{formatCurrency(unitCoinCost)}</td>
-                                    <td className="py-1 text-right text-slate-400">×{qty}</td>
-                                    <td className="py-1 text-right font-medium">{formatCurrency(totalCoinCost)}</td>
-                                  </tr>
-                                  <tr>
-                                    <td className="py-1 text-slate-600">Grading Cost</td>
-                                    <td className="py-1 text-right">{formatCurrency(unitGradingCost)}</td>
-                                    <td className="py-1 text-right text-slate-400">×{qty}</td>
-                                    <td className="py-1 text-right font-medium">{formatCurrency(totalGradingCost)}</td>
-                                  </tr>
-                                </tbody>
-                              </table>
+                              {/* Calculation */}
+                              <div className="flex gap-4 border-l pl-4">
+                                <div>
+                                  <span className="text-slate-500">Profit:</span>
+                                  <span className={`ml-1 font-medium ${profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                    {formatCurrency(ebayPayout)} − {formatCurrency(totalCoinCost)} − {formatCurrency(totalGradingCost)} = {formatCurrency(profit)}
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-slate-500">Admin:</span>
+                                  <span className="ml-1 text-amber-600">−{formatCurrency(adminShare)}</span>
+                                  <span className="text-slate-400 ml-1">(max 33%, ${8 * qty} min)</span>
+                                </div>
+                              </div>
                               
-                              {/* Payout Calculation */}
-                              <div className="bg-slate-50 rounded-lg p-3 space-y-2">
-                                {/* Step 1: Calculate Profit */}
-                                <div className="flex justify-between text-sm">
-                                  <span className="text-slate-600">eBay Payout</span>
-                                  <span className="font-medium">{formatCurrency(ebayPayout)}</span>
-                                </div>
-                                <div className="flex justify-between text-sm">
-                                  <span className="text-slate-600">− Coin Cost</span>
-                                  <span className="text-red-600">−{formatCurrency(totalCoinCost)}</span>
-                                </div>
-                                <div className="flex justify-between text-sm">
-                                  <span className="text-slate-600">− Grading Cost</span>
-                                  <span className="text-red-600">−{formatCurrency(totalGradingCost)}</span>
-                                </div>
-                                <div className="flex justify-between text-sm font-medium border-t pt-2">
-                                  <span className="text-slate-700">= Profit</span>
-                                  <span className={profit >= 0 ? 'text-emerald-600' : 'text-red-600'}>{formatCurrency(profit)}</span>
-                                </div>
-                                
-                                {/* Step 2: Admin Share */}
-                                <div className="flex justify-between text-sm pt-2">
-                                  <span className="text-slate-600">Admin Share</span>
-                                  <span className="text-amber-600">−{formatCurrency(adminShare)}</span>
-                                </div>
-                                <div className="text-[10px] text-slate-400 pl-2">
-                                  max(33% × {formatCurrency(profit)}, {formatCurrency(8 * qty)} min)
-                                </div>
-                                
-                                {/* Step 3: Member Payout */}
-                                <div className="border-t pt-2 mt-2">
-                                  <div className="text-[10px] text-slate-400 mb-1">
-                                    {formatCurrency(ebayPayout)} − {formatCurrency(totalGradingCost)} − {formatCurrency(adminShare)}
-                                  </div>
-                                  <div className="flex justify-between text-sm font-semibold">
-                                    <span className="text-slate-900">Member Payout</span>
-                                    <span className={`text-lg ${memberPayout > 0 ? 'text-emerald-600' : 'text-slate-500'}`}>
-                                      {formatCurrency(memberPayout)}
-                                    </span>
-                                  </div>
-                                </div>
+                              {/* Member Payout */}
+                              <div className="border-l pl-4">
+                                <span className="text-slate-500">Member Payout:</span>
+                                <span className={`ml-1 font-semibold ${memberPayout > 0 ? 'text-emerald-600' : 'text-slate-500'}`}>
+                                  {formatCurrency(memberPayout)}
+                                </span>
                               </div>
                             </div>
                           </td>
