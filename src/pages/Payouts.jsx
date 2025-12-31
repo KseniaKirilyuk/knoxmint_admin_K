@@ -12,6 +12,7 @@ export default function Payouts() {
   const [activeTab, setActiveTab] = useState('batches')
   const [expandedMembers, setExpandedMembers] = useState({})
   const [expandedBatches, setExpandedBatches] = useState({})
+  const [expandedCoinRows, setExpandedCoinRows] = useState({})
   const [payModal, setPayModal] = useState(null)
   const [paymentForm, setPaymentForm] = useState({ amount: '', method: 'Zelle', reference: '', notes: '' })
   const [editModal, setEditModal] = useState(null)
@@ -601,24 +602,37 @@ export default function Payouts() {
                                     </thead>
                                     <tbody>
                                       {breakdown.map((row, idx) => {
+                                        const rowKey = `${member.user_id}-${row.batch_id}-${row.catalog_id}`
+                                        const isRowExpanded = expandedCoinRows[rowKey]
                                         const batchMembersPayout = parseFloat(row.batch_members_payout) || 0
                                         const memberPayout = parseFloat(row.member_payout) || 0
                                         const noSales = parseInt(row.total_sold) === 0
                                         const gradedSold = parseInt(row.graded_sold) || 0
                                         const ungradedSold = parseInt(row.ungraded_sold) || 0
-                                        const memberPending = parseInt(row.member_pending) || 0
+                                        const gradedBatchPayout = parseFloat(row.graded_batch_payout) || 0
+                                        const ungradedBatchPayout = parseFloat(row.ungraded_batch_payout) || 0
+                                        const gradedMemberPayout = parseFloat(row.graded_member_payout) || 0
+                                        const ungradedMemberPayout = parseFloat(row.ungraded_member_payout) || 0
+                                        const memberPending = parseFloat(row.member_pending) || 0
+                                        const hasBothTypes = gradedSold > 0 && ungradedSold > 0
                                         
                                         return (
                                         <React.Fragment key={idx}>
-                                          <tr className="border-t hover:bg-slate-50">
+                                          <tr 
+                                            className={`border-t hover:bg-slate-50 ${hasBothTypes ? 'cursor-pointer' : ''}`}
+                                            onClick={() => hasBothTypes && setExpandedCoinRows(prev => ({ ...prev, [rowKey]: !prev[rowKey] }))}
+                                          >
                                             <td className="px-4 py-2">
                                               <div className="flex items-center gap-2">
+                                                {hasBothTypes && (
+                                                  isRowExpanded ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />
+                                                )}
                                                 <span className="font-medium text-slate-900">
                                                   {row.coin_type_name?.replace(' (Ungraded)', '')}
                                                 </span>
                                               </div>
                                               {row.batch_name && (
-                                                <span className="text-xs text-slate-400">{row.batch_name}</span>
+                                                <span className="text-xs text-slate-400 ml-6">{row.batch_name}</span>
                                               )}
                                             </td>
                                             <td className="px-4 py-2 text-right">{row.user_contributed}</td>
@@ -657,13 +671,42 @@ export default function Payouts() {
                                               )}
                                             </td>
                                             <td className="px-4 py-2 text-right">
-                                              {memberPending > 0 ? (
-                                                <span className="text-amber-600">{memberPending} coins</span>
+                                              {memberPending > 0.01 ? (
+                                                <span className="text-amber-600">{memberPending.toFixed(2)} coins</span>
                                               ) : (
-                                                <span className="text-emerald-600">✓</span>
+                                                <span className="text-emerald-600">0</span>
                                               )}
                                             </td>
                                           </tr>
+                                          {/* Expanded graded/ungraded breakdown */}
+                                          {isRowExpanded && hasBothTypes && (
+                                            <>
+                                              <tr className="bg-emerald-50/50 border-t border-emerald-100">
+                                                <td className="px-4 py-1.5 pl-10">
+                                                  <span className="text-xs font-medium text-emerald-700">↳ Graded</span>
+                                                </td>
+                                                <td className="px-4 py-1.5 text-right text-xs text-slate-500">—</td>
+                                                <td className="px-4 py-1.5 text-right text-xs text-slate-500">—</td>
+                                                <td className="px-4 py-1.5 text-right text-xs text-emerald-600">{gradedSold}</td>
+                                                <td className="px-4 py-1.5 text-right text-xs text-slate-500">—</td>
+                                                <td className="px-4 py-1.5 text-right text-xs text-emerald-600">{formatCurrency(gradedBatchPayout)}</td>
+                                                <td className="px-4 py-1.5 text-right text-xs font-medium text-emerald-600">{formatCurrency(gradedMemberPayout)}</td>
+                                                <td className="px-4 py-1.5"></td>
+                                              </tr>
+                                              <tr className="bg-amber-50/50 border-t border-amber-100">
+                                                <td className="px-4 py-1.5 pl-10">
+                                                  <span className="text-xs font-medium text-amber-700">↳ Ungraded</span>
+                                                </td>
+                                                <td className="px-4 py-1.5 text-right text-xs text-slate-500">—</td>
+                                                <td className="px-4 py-1.5 text-right text-xs text-slate-500">—</td>
+                                                <td className="px-4 py-1.5 text-right text-xs text-amber-600">{ungradedSold}</td>
+                                                <td className="px-4 py-1.5 text-right text-xs text-slate-500">—</td>
+                                                <td className="px-4 py-1.5 text-right text-xs text-amber-600">{formatCurrency(ungradedBatchPayout)}</td>
+                                                <td className="px-4 py-1.5 text-right text-xs font-medium text-amber-600">{formatCurrency(ungradedMemberPayout)}</td>
+                                                <td className="px-4 py-1.5"></td>
+                                              </tr>
+                                            </>
+                                          )}
                                         </React.Fragment>
                                         )
                                       })}

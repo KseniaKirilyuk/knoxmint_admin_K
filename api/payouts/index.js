@@ -227,9 +227,13 @@ export default async function handler(req, res) {
           
           // Member's payout from sold coins
           const memberPayout = totalBatchMembersPayout * sharePct;
+          const gradedMemberPayout = gradedBatchPayout * sharePct;
+          const ungradedMemberPayout = ungradedBatchPayout * sharePct;
           
-          // Pending = member's coins that haven't sold yet
-          const memberPending = Math.max(0, userContributed - totalSold);
+          // Pending = member's coins worth not yet paid (fraction)
+          // totalSold × sharePct = coins worth already paid
+          const coinsPaidFor = totalSold * sharePct;
+          const memberPending = Math.max(0, userContributed - coinsPaidFor);
           
           rows.push({
             batch_id: contrib.batch_id,
@@ -243,11 +247,13 @@ export default async function handler(req, res) {
             total_sold: totalSold,
             graded_sold: gradedSold,
             graded_batch_payout: gradedBatchPayout.toFixed(2),
+            graded_member_payout: gradedMemberPayout.toFixed(2),
             ungraded_sold: ungradedSold,
             ungraded_batch_payout: ungradedBatchPayout.toFixed(2),
+            ungraded_member_payout: ungradedMemberPayout.toFixed(2),
             batch_members_payout: totalBatchMembersPayout.toFixed(2),
             member_payout: memberPayout.toFixed(2),
-            member_pending: memberPending
+            member_pending: memberPending.toFixed(2)
           });
         }
         
