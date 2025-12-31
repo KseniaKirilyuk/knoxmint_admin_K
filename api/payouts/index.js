@@ -166,7 +166,7 @@ export default async function handler(req, res) {
             user_contributed: userContributed,
             batch_pool: batchPool,
             total_sold: sold,
-            share_pct: (sharePct * 100).toFixed(1),
+            share_pct: (sharePct * 100).toFixed(2),
             batch_profit: batchProfit.toFixed(2),
             batch_members_payout: batchMemberPayout.toFixed(2),
             member_payout: memberPayout.toFixed(2)
