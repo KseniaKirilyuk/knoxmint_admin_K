@@ -591,50 +591,46 @@ export default function Payouts() {
                                       <tr className="bg-slate-100">
                                         <th className="px-4 py-2 text-left font-medium text-slate-600">Coin Type</th>
                                         <th className="px-4 py-2 text-right font-medium text-slate-600">Member</th>
-                                        <th className="px-4 py-2 text-right font-medium text-slate-600">Batch Pool</th>
-                                        <th className="px-4 py-2 text-right font-medium text-slate-600">Sold</th>
+                                        <th className="px-4 py-2 text-right font-medium text-slate-600">Batch</th>
+                                        <th className="px-4 py-2 text-right font-medium text-slate-600">Sold (GR/UG)</th>
                                         <th className="px-4 py-2 text-right font-medium text-slate-600">Share %</th>
-                                        <th className="px-4 py-2 text-right font-medium text-slate-600">Batch Profit</th>
                                         <th className="px-4 py-2 text-right font-medium text-slate-600">Batch Members Payout</th>
                                         <th className="px-4 py-2 text-right font-medium text-slate-600">Member Payout</th>
+                                        <th className="px-4 py-2 text-right font-medium text-slate-600">Pending</th>
                                       </tr>
                                     </thead>
                                     <tbody>
                                       {breakdown.map((row, idx) => {
-                                        const batchProfit = parseFloat(row.batch_profit) || 0
                                         const batchMembersPayout = parseFloat(row.batch_members_payout) || 0
                                         const memberPayout = parseFloat(row.member_payout) || 0
-                                        const isNegativeProfit = batchProfit < 0
                                         const noSales = parseInt(row.total_sold) === 0
-                                        const isUngraded = row.is_ungraded
+                                        const gradedSold = parseInt(row.graded_sold) || 0
+                                        const ungradedSold = parseInt(row.ungraded_sold) || 0
+                                        const memberPending = parseInt(row.member_pending) || 0
                                         
                                         return (
                                         <React.Fragment key={idx}>
-                                          <tr className={`border-t ${isNegativeProfit ? 'bg-amber-50' : ''}`}>
+                                          <tr className="border-t hover:bg-slate-50">
                                             <td className="px-4 py-2">
                                               <div className="flex items-center gap-2">
                                                 <span className="font-medium text-slate-900">
                                                   {row.coin_type_name?.replace(' (Ungraded)', '')}
                                                 </span>
-                                                {isUngraded ? (
-                                                  <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-xs font-medium">
-                                                    UG
-                                                  </span>
-                                                ) : (
-                                                  <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded text-xs font-medium">
-                                                    GR
-                                                  </span>
-                                                )}
                                               </div>
                                               {row.batch_name && (
                                                 <span className="text-xs text-slate-400">{row.batch_name}</span>
                                               )}
                                             </td>
                                             <td className="px-4 py-2 text-right">{row.user_contributed}</td>
-                                            <td className="px-4 py-2 text-right text-slate-500">{row.batch_pool || 0}</td>
+                                            <td className="px-4 py-2 text-right text-slate-500">{row.total_batch || 0}</td>
                                             <td className="px-4 py-2 text-right">
                                               {parseInt(row.total_sold) > 0 ? (
-                                                <span className="text-emerald-600">{row.total_sold}</span>
+                                                <div className="flex items-center justify-end gap-1">
+                                                  <span className="text-emerald-600">{row.total_sold}</span>
+                                                  <span className="text-xs text-slate-400">
+                                                    ({gradedSold}<span className="text-emerald-500">GR</span>/{ungradedSold}<span className="text-amber-500">UG</span>)
+                                                  </span>
+                                                </div>
                                               ) : (
                                                 <span className="text-slate-400">0</span>
                                               )}
@@ -643,15 +639,6 @@ export default function Payouts() {
                                               <span className="px-2 py-0.5 bg-knox-50 text-knox-700 rounded text-xs">
                                                 {row.share_pct}%
                                               </span>
-                                            </td>
-                                            <td className="px-4 py-2 text-right">
-                                              {noSales ? (
-                                                <span className="text-slate-400">—</span>
-                                              ) : (
-                                                <span className={batchProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}>
-                                                  {formatCurrency(batchProfit)}
-                                                </span>
-                                              )}
                                             </td>
                                             <td className="px-4 py-2 text-right">
                                               {noSales ? (
@@ -667,6 +654,13 @@ export default function Payouts() {
                                                 <span className="text-emerald-600">{formatCurrency(memberPayout)}</span>
                                               ) : (
                                                 <span className="text-slate-500">{formatCurrency(memberPayout)}</span>
+                                              )}
+                                            </td>
+                                            <td className="px-4 py-2 text-right">
+                                              {memberPending > 0 ? (
+                                                <span className="text-amber-600">{memberPending} coins</span>
+                                              ) : (
+                                                <span className="text-emerald-600">✓</span>
                                               )}
                                             </td>
                                           </tr>

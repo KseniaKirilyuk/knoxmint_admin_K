@@ -19,29 +19,19 @@ export default async function handler(req, res) {
 
       // Get member totals
       if (action === 'memberTotals') {
-        // Get all user contributions with batch info
+        // Get all user contributions with catalog_id
         const contribResult = await query(`
           SELECT 
             uc.user_id,
             u.username,
             u.full_name,
             uc.batch_id,
-            uc.coin_type_id,
-            uc.quantity as user_contributed,
-            bc.total_contributed as batch_pool,
-            COALESCE(bc.cost_per_coin, 0) as cost_per_coin,
-            COALESCE(bc.grading_cost_per_coin, 0) as grading_cost_per_coin,
-            COALESCE(SUM(st.quantity_sold), 0) as total_sold,
-            COALESCE(SUM(st.total_payout), 0) as ebay_payout
+            ct.catalog_id,
+            uc.quantity as user_contributed
           FROM user_contributions uc
           JOIN users u ON uc.user_id = u.user_id
-          LEFT JOIN batch_coins bc ON bc.batch_id = uc.batch_id AND bc.coin_type_id = uc.coin_type_id
-          LEFT JOIN sales_transactions st ON st.batch_id = uc.batch_id 
-            AND st.coin_type_id = uc.coin_type_id 
-            AND COALESCE(st.is_refund, false) = false
+          JOIN coin_types ct ON uc.coin_type_id = ct.coin_type_id
           WHERE uc.quantity > 0
-          GROUP BY uc.user_id, u.username, u.full_name, uc.batch_id, uc.coin_type_id, 
-                   uc.quantity, bc.total_contributed, bc.cost_per_coin, bc.grading_cost_per_coin
         `);
         
         // Get payments made
@@ -53,40 +43,86 @@ export default async function handler(req, res) {
         const payments = {};
         paymentsResult.rows.forEach(r => payments[r.user_id] = parseFloat(r.total_paid) || 0);
         
-        // Aggregate by user, calculating on the fly
+        // Group contributions by user + batch + catalog_id
+        const contribMap = {};
+        for (const row of contribResult.rows) {
+          const key = `${row.user_id}-${row.batch_id}-${row.catalog_id}`;
+          if (!contribMap[key]) {
+            contribMap[key] = {
+              user_id: row.user_id,
+              username: row.username,
+              full_name: row.full_name,
+              batch_id: row.batch_id,
+              catalog_id: row.catalog_id,
+              user_contributed: 0
+            };
+          }
+          contribMap[key].user_contributed += parseInt(row.user_contributed) || 0;
+        }
+        
+        // Calculate earnings per user
         const userMap = {};
         
-        for (const row of contribResult.rows) {
-          const userId = row.user_id;
+        for (const contrib of Object.values(contribMap)) {
+          const userId = contrib.user_id;
           if (!userMap[userId]) {
             userMap[userId] = {
               user_id: userId,
-              username: row.username,
-              full_name: row.full_name,
+              username: contrib.username,
+              full_name: contrib.full_name,
               total_contributed: 0,
               total_earned: 0
             };
           }
           
-          userMap[userId].total_contributed += parseInt(row.user_contributed) || 0;
+          userMap[userId].total_contributed += contrib.user_contributed;
           
-          const sold = parseInt(row.total_sold) || 0;
-          if (sold > 0) {
-            const userContributed = parseInt(row.user_contributed) || 0;
-            const batchPool = parseInt(row.batch_pool) || 0;
-            const sharePct = batchPool > 0 ? (userContributed / batchPool) : 0;
+          // Get total batch contributions for this catalog_id
+          const batchTotalResult = await query(`
+            SELECT COALESCE(SUM(uc.quantity), 0) as total_batch
+            FROM user_contributions uc
+            JOIN coin_types ct ON uc.coin_type_id = ct.coin_type_id
+            WHERE uc.batch_id = $1 AND ct.catalog_id = $2
+          `, [contrib.batch_id, contrib.catalog_id]);
+          
+          const totalBatch = parseInt(batchTotalResult.rows[0]?.total_batch) || 0;
+          const sharePct = totalBatch > 0 ? (contrib.user_contributed / totalBatch) : 0;
+          
+          // Get ALL coin types with this catalog_id (graded + ungraded)
+          const coinTypesResult = await query(`
+            SELECT ct.coin_type_id, ct.is_ungraded,
+                   COALESCE(bc.cost_per_coin, 0) as cost_per_coin,
+                   COALESCE(bc.grading_cost_per_coin, 0) as grading_cost_per_coin
+            FROM coin_types ct
+            LEFT JOIN batch_coins bc ON bc.coin_type_id = ct.coin_type_id AND bc.batch_id = $1
+            WHERE ct.catalog_id = $2
+          `, [contrib.batch_id, contrib.catalog_id]);
+          
+          for (const coinType of coinTypesResult.rows) {
+            // Get sales for this coin type in this batch
+            const salesResult = await query(`
+              SELECT 
+                COALESCE(SUM(quantity_sold), 0) as sold,
+                COALESCE(SUM(total_payout), 0) as ebay_payout
+              FROM sales_transactions
+              WHERE batch_id = $1 AND coin_type_id = $2 AND COALESCE(is_refund, false) = false
+            `, [contrib.batch_id, coinType.coin_type_id]);
             
-            const ebayPayout = parseFloat(row.ebay_payout) || 0;
-            const costPerCoin = parseFloat(row.cost_per_coin) || 0;
-            const gradingCostPerCoin = parseFloat(row.grading_cost_per_coin) || 0;
+            const sold = parseInt(salesResult.rows[0]?.sold) || 0;
+            const ebayPayout = parseFloat(salesResult.rows[0]?.ebay_payout) || 0;
             
-            const totalCoinCost = costPerCoin * sold;
-            const totalGradingCost = gradingCostPerCoin * sold;
-            const batchProfit = ebayPayout - totalCoinCost - totalGradingCost;
-            const adminShare = Math.max(0.33 * batchProfit, 8 * sold);
-            const batchMemberPayout = Math.max(0, ebayPayout - totalGradingCost - adminShare);
-            
-            userMap[userId].total_earned += batchMemberPayout * sharePct;
+            if (sold > 0) {
+              const costPerCoin = parseFloat(coinType.cost_per_coin) || 0;
+              const gradingCostPerCoin = parseFloat(coinType.grading_cost_per_coin) || 0;
+              
+              const totalCoinCost = costPerCoin * sold;
+              const totalGradingCost = gradingCostPerCoin * sold;
+              const profit = ebayPayout - totalCoinCost - totalGradingCost;
+              const adminShare = Math.max(0.33 * profit, 8 * sold);
+              const batchMembersPayout = Math.max(0, ebayPayout - totalGradingCost - adminShare);
+              
+              userMap[userId].total_earned += batchMembersPayout * sharePct;
+            }
           }
         }
         
@@ -103,75 +139,117 @@ export default async function handler(req, res) {
       }
 
       // Get breakdown for a specific member
-      // Calculate profit on the fly using current batch_coins costs (matching batch payouts)
+      // Calculate profit on the fly, include both graded and ungraded sales
       if (action === 'memberBreakdown' && userId) {
-        // Get user's contributions with batch pool info
-        const result = await query(`
+        // Get user's contributions with catalog_id to link graded/ungraded
+        const contribResult = await query(`
           SELECT 
-            b.batch_id,
+            uc.batch_id,
             b.batch_name,
             b.ship_date,
-            ct.coin_type_id,
+            ct.catalog_id,
             ct.name as coin_type_name,
-            ct.is_ungraded,
-            uc.quantity as user_contributed,
-            bc.total_contributed as batch_pool,
-            COALESCE(bc.cost_per_coin, 0) as cost_per_coin,
-            COALESCE(bc.grading_cost_per_coin, 0) as grading_cost_per_coin,
-            COALESCE(SUM(st.quantity_sold), 0) as total_sold,
-            COALESCE(SUM(st.total_payout), 0) as ebay_payout,
-            COALESCE(SUM(st.coin_cost), 0) as total_coin_cost_stored
+            uc.quantity as user_contributed
           FROM user_contributions uc
           JOIN batches b ON uc.batch_id = b.batch_id
           JOIN coin_types ct ON uc.coin_type_id = ct.coin_type_id
-          LEFT JOIN batch_coins bc ON bc.batch_id = uc.batch_id AND bc.coin_type_id = uc.coin_type_id
-          LEFT JOIN sales_transactions st ON st.batch_id = uc.batch_id 
-            AND st.coin_type_id = uc.coin_type_id 
-            AND COALESCE(st.is_refund, false) = false
           WHERE uc.user_id = $1 AND uc.quantity > 0
-          GROUP BY b.batch_id, b.batch_name, b.ship_date, ct.coin_type_id, ct.name, ct.is_ungraded, 
-                   uc.quantity, bc.total_contributed, bc.cost_per_coin, bc.grading_cost_per_coin
           ORDER BY b.ship_date DESC NULLS LAST, ct.name
         `, [userId]);
         
-        // Calculate on the fly (matching batch payouts logic)
-        const rows = result.rows.map(row => {
-          const userContributed = parseInt(row.user_contributed) || 0;
-          const batchPool = parseInt(row.batch_pool) || 0;
-          const sold = parseInt(row.total_sold) || 0;
-          const ebayPayout = parseFloat(row.ebay_payout) || 0;
-          const costPerCoin = parseFloat(row.cost_per_coin) || 0;
-          const gradingCostPerCoin = parseFloat(row.grading_cost_per_coin) || 0;
+        const rows = [];
+        
+        for (const contrib of contribResult.rows) {
+          // Get total batch contributions for this catalog_id
+          const batchTotalResult = await query(`
+            SELECT COALESCE(SUM(uc.quantity), 0) as total_batch
+            FROM user_contributions uc
+            JOIN coin_types ct ON uc.coin_type_id = ct.coin_type_id
+            WHERE uc.batch_id = $1 AND ct.catalog_id = $2
+          `, [contrib.batch_id, contrib.catalog_id]);
           
-          // Share % based on batch pool contribution
-          const sharePct = batchPool > 0 ? (userContributed / batchPool) : 0;
+          const totalBatch = parseInt(batchTotalResult.rows[0]?.total_batch) || 0;
+          const userContributed = parseInt(contrib.user_contributed) || 0;
+          const sharePct = totalBatch > 0 ? (userContributed / totalBatch) : 0;
           
-          // Calculate batch profit using current costs (same as batch payouts)
-          const totalCoinCost = costPerCoin * sold;
-          const totalGradingCost = gradingCostPerCoin * sold;
-          const batchProfit = ebayPayout - totalCoinCost - totalGradingCost;
-          const adminShare = Math.max(0.33 * batchProfit, 8 * sold);
-          const batchMemberPayout = Math.max(0, ebayPayout - totalGradingCost - adminShare);
+          // Get ALL coin types with this catalog_id (graded + ungraded)
+          const coinTypesResult = await query(`
+            SELECT ct.coin_type_id, ct.name, ct.is_ungraded, 
+                   COALESCE(bc.cost_per_coin, 0) as cost_per_coin,
+                   COALESCE(bc.grading_cost_per_coin, 0) as grading_cost_per_coin
+            FROM coin_types ct
+            LEFT JOIN batch_coins bc ON bc.coin_type_id = ct.coin_type_id AND bc.batch_id = $1
+            WHERE ct.catalog_id = $2
+          `, [contrib.batch_id, contrib.catalog_id]);
           
-          // Member's share of the batch payout
-          const memberPayout = batchMemberPayout * sharePct;
+          let totalSold = 0;
+          let totalBatchMembersPayout = 0;
+          let gradedSold = 0;
+          let gradedBatchPayout = 0;
+          let ungradedSold = 0;
+          let ungradedBatchPayout = 0;
           
-          return {
-            batch_id: row.batch_id,
-            batch_name: row.batch_name,
-            ship_date: row.ship_date,
-            coin_type_id: row.coin_type_id,
-            coin_type_name: row.coin_type_name,
-            is_ungraded: row.is_ungraded,
+          for (const coinType of coinTypesResult.rows) {
+            // Get sales for this coin type in this batch
+            const salesResult = await query(`
+              SELECT 
+                COALESCE(SUM(quantity_sold), 0) as sold,
+                COALESCE(SUM(total_payout), 0) as ebay_payout
+              FROM sales_transactions
+              WHERE batch_id = $1 AND coin_type_id = $2 AND COALESCE(is_refund, false) = false
+            `, [contrib.batch_id, coinType.coin_type_id]);
+            
+            const sold = parseInt(salesResult.rows[0]?.sold) || 0;
+            const ebayPayout = parseFloat(salesResult.rows[0]?.ebay_payout) || 0;
+            
+            if (sold > 0) {
+              const costPerCoin = parseFloat(coinType.cost_per_coin) || 0;
+              const gradingCostPerCoin = parseFloat(coinType.grading_cost_per_coin) || 0;
+              
+              const totalCoinCost = costPerCoin * sold;
+              const totalGradingCost = gradingCostPerCoin * sold;
+              const profit = ebayPayout - totalCoinCost - totalGradingCost;
+              const adminShare = Math.max(0.33 * profit, 8 * sold);
+              const batchMembersPayout = Math.max(0, ebayPayout - totalGradingCost - adminShare);
+              
+              totalSold += sold;
+              totalBatchMembersPayout += batchMembersPayout;
+              
+              if (coinType.is_ungraded) {
+                ungradedSold += sold;
+                ungradedBatchPayout += batchMembersPayout;
+              } else {
+                gradedSold += sold;
+                gradedBatchPayout += batchMembersPayout;
+              }
+            }
+          }
+          
+          // Member's payout from sold coins
+          const memberPayout = totalBatchMembersPayout * sharePct;
+          
+          // Pending = member's coins that haven't sold yet
+          const memberPending = Math.max(0, userContributed - totalSold);
+          
+          rows.push({
+            batch_id: contrib.batch_id,
+            batch_name: contrib.batch_name,
+            ship_date: contrib.ship_date,
+            catalog_id: contrib.catalog_id,
+            coin_type_name: contrib.coin_type_name,
             user_contributed: userContributed,
-            batch_pool: batchPool,
-            total_sold: sold,
+            total_batch: totalBatch,
             share_pct: (sharePct * 100).toFixed(2),
-            batch_profit: batchProfit.toFixed(2),
-            batch_members_payout: batchMemberPayout.toFixed(2),
-            member_payout: memberPayout.toFixed(2)
-          };
-        });
+            total_sold: totalSold,
+            graded_sold: gradedSold,
+            graded_batch_payout: gradedBatchPayout.toFixed(2),
+            ungraded_sold: ungradedSold,
+            ungraded_batch_payout: ungradedBatchPayout.toFixed(2),
+            batch_members_payout: totalBatchMembersPayout.toFixed(2),
+            member_payout: memberPayout.toFixed(2),
+            member_pending: memberPending
+          });
+        }
         
         return res.json(rows);
       }
