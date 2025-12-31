@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Search, Edit2, Trash2, X } from 'lucide-react'
+import { Plus, Search, Edit2, Trash2, X, AlertTriangle } from 'lucide-react'
 import api from '../lib/api'
 
 export default function Users() {
@@ -15,6 +15,13 @@ export default function Users() {
     paymentInfo: '',
     role: 'user'
   })
+  
+  // Delete/merge state
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [deletingUser, setDeletingUser] = useState(null)
+  const [deleteCheck, setDeleteCheck] = useState(null)
+  const [mergeTargetId, setMergeTargetId] = useState('')
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     fetchUsers()
@@ -59,6 +66,44 @@ export default function Users() {
       role: user.role
     })
     setShowModal(true)
+  }
+
+  const handleDeleteClick = async (user) => {
+    setDeletingUser(user)
+    setMergeTargetId('')
+    setDeleteCheck(null)
+    
+    try {
+      const response = await api.get(`/users?action=canDelete&userId=${user.user_id}`)
+      setDeleteCheck(response.data)
+    } catch (error) {
+      console.error('Error checking delete status:', error)
+      setDeleteCheck({ canDelete: false, error: true })
+    }
+    
+    setShowDeleteModal(true)
+  }
+
+  const handleDelete = async () => {
+    if (!deletingUser) return
+    
+    setDeleting(true)
+    try {
+      const url = mergeTargetId 
+        ? `/users?userId=${deletingUser.user_id}&mergeIntoUserId=${mergeTargetId}`
+        : `/users?userId=${deletingUser.user_id}`
+      
+      await api.delete(url)
+      setShowDeleteModal(false)
+      setDeletingUser(null)
+      setDeleteCheck(null)
+      fetchUsers()
+    } catch (error) {
+      console.error('Error deleting user:', error)
+      alert(error.response?.data?.error || 'Error deleting user')
+    } finally {
+      setDeleting(false)
+    }
   }
 
   const filteredUsers = users.filter(user =>
@@ -157,6 +202,12 @@ export default function Users() {
                     >
                       <Edit2 className="w-4 h-4" />
                     </button>
+                    <button
+                      onClick={() => handleDeleteClick(user)}
+                      className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </td>
                 </tr>
               ))
@@ -239,6 +290,99 @@ export default function Users() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete/Archive Modal */}
+      {showDeleteModal && deletingUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <h2 className="text-lg font-semibold">Archive User</h2>
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                className="p-2 hover:bg-slate-100 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-slate-600">
+                Are you sure you want to archive <strong>{deletingUser.full_name || deletingUser.username}</strong>?
+              </p>
+              
+              {deleteCheck === null ? (
+                <div className="flex items-center justify-center py-4">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-knox-600"></div>
+                </div>
+              ) : deleteCheck.totalContributions > 0 || parseFloat(deleteCheck.unpaidBalance) > 0 ? (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                    <div className="text-sm">
+                      <p className="font-medium text-amber-800 mb-2">This user has active data:</p>
+                      <ul className="text-amber-700 space-y-1">
+                        {deleteCheck.totalContributions > 0 && (
+                          <li>• {deleteCheck.totalContributions} coin contributions</li>
+                        )}
+                        {parseFloat(deleteCheck.unpaidBalance) > 0 && (
+                          <li>• ${deleteCheck.unpaidBalance} unpaid balance</li>
+                        )}
+                      </ul>
+                      <p className="mt-3 text-amber-800">
+                        To archive this user, you must first merge their data into another user:
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="mt-4">
+                    <label className="label">Merge into user:</label>
+                    <select
+                      value={mergeTargetId}
+                      onChange={(e) => setMergeTargetId(e.target.value)}
+                      className="input"
+                    >
+                      <option value="">Select a user...</option>
+                      {users
+                        .filter(u => u.user_id !== deletingUser.user_id && u.is_active)
+                        .map(u => (
+                          <option key={u.user_id} value={u.user_id}>
+                            {u.full_name || u.username} (@{u.username})
+                          </option>
+                        ))
+                      }
+                    </select>
+                    {mergeTargetId && (
+                      <p className="text-xs text-amber-600 mt-2">
+                        All contributions and payouts will be transferred to the selected user.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+                  <p className="text-sm text-emerald-700">
+                    ✓ This user has no active contributions or unpaid balances. Safe to archive.
+                  </p>
+                </div>
+              )}
+            </div>
+            <div className="px-6 py-4 border-t bg-slate-50 flex gap-3">
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                className="btn btn-secondary flex-1"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting || (deleteCheck && (deleteCheck.totalContributions > 0 || parseFloat(deleteCheck.unpaidBalance) > 0) && !mergeTargetId)}
+                className="btn bg-red-600 hover:bg-red-700 text-white flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {deleting ? 'Archiving...' : mergeTargetId ? 'Merge & Archive' : 'Archive User'}
+              </button>
+            </div>
           </div>
         </div>
       )}

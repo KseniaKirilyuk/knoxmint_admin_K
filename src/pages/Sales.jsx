@@ -873,17 +873,6 @@ export default function Sales() {
                     onChange={(e) => setEditForm({ ...editForm, salePrice: e.target.value })}
                   />
                 </div>
-                <div>
-                  <label className="label">Coin Cost ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    className="input"
-                    value={editForm.coinCost}
-                    onChange={(e) => setEditForm({ ...editForm, coinCost: e.target.value })}
-                  />
-                </div>
               </div>
 
               <div className="grid grid-cols-3 gap-4">
