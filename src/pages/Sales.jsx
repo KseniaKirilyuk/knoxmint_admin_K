@@ -40,6 +40,7 @@ export default function Sales() {
 
   // Create test sale state
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [reassigning, setReassigning] = useState(false)
   const [createForm, setCreateForm] = useState({
     batchId: '',
     coinTypeId: '',
@@ -158,6 +159,21 @@ export default function Sales() {
       }
     } catch (error) {
       alert('Error creating sale: ' + (error.response?.data?.error || error.message))
+    }
+  }
+
+  const handleReassignBatches = async () => {
+    if (!confirm('Re-assign all unmapped sales to batches based on coin type?\n\nThis will match sales that have a coin type but no batch to the appropriate batch.')) return
+    
+    setReassigning(true)
+    try {
+      const res = await api.put('/upload?action=reassignBatches')
+      alert(res.data.message)
+      fetchTransactions()
+    } catch (error) {
+      alert('Error: ' + (error.response?.data?.error || error.message))
+    } finally {
+      setReassigning(false)
     }
   }
 
@@ -327,6 +343,14 @@ export default function Sales() {
           <p className="text-slate-500 mt-1">View all imported eBay sales</p>
         </div>
         <div className="flex gap-2">
+          <button 
+            onClick={handleReassignBatches} 
+            disabled={reassigning}
+            className="btn btn-secondary gap-2"
+          >
+            <Wand2 className="w-4 h-4" />
+            {reassigning ? 'Reassigning...' : 'Re-assign Batches'}
+          </button>
           <button onClick={() => setShowCreateModal(true)} className="btn btn-primary gap-2">
             <Plus className="w-4 h-4" />
             Create Test Sale

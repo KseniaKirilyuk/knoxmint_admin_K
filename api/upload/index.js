@@ -40,6 +40,97 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Invalid action' });
   }
 
+  // Handle PUT - reassign batches
+  if (req.method === 'PUT') {
+    const { action } = req.query;
+    if (action === 'reassignBatches') {
+      try {
+        // Find all sales without batch_id but with coin_type_id
+        const unmappedSales = await query(`
+          SELECT transaction_id, coin_type_id, quantity_sold
+          FROM sales_transactions
+          WHERE batch_id IS NULL AND coin_type_id IS NOT NULL
+        `);
+        
+        let reassigned = 0;
+        let notFound = 0;
+        
+        for (const sale of unmappedSales.rows) {
+          // Find batch with this coin type that has cost set and available inventory
+          const batchResult = await query(`
+            SELECT bc.batch_id, bc.cost_per_coin, bc.grading_cost_per_coin
+            FROM batch_coins bc
+            JOIN batches b ON bc.batch_id = b.batch_id
+            WHERE bc.coin_type_id = $1 
+              AND bc.cost_per_coin IS NOT NULL
+              AND bc.total_sold < bc.total_contributed
+            ORDER BY b.ship_date ASC NULLS LAST, b.created_at ASC
+            LIMIT 1
+          `, [sale.coin_type_id]);
+          
+          if (batchResult.rows.length > 0) {
+            const batch = batchResult.rows[0];
+            const coinCost = parseFloat(batch.cost_per_coin) || 0;
+            const gradingCost = parseFloat(batch.grading_cost_per_coin) || 0;
+            const quantity = parseInt(sale.quantity_sold) || 1;
+            
+            // Get sale details to recalculate
+            const saleDetails = await query(`
+              SELECT total_payout FROM sales_transactions WHERE transaction_id = $1
+            `, [sale.transaction_id]);
+            
+            const totalPayout = parseFloat(saleDetails.rows[0]?.total_payout) || 0;
+            const totalCoinCost = coinCost * quantity;
+            const totalGradingCost = gradingCost * quantity;
+            
+            // Recalculate profit with correct costs
+            const profit = totalPayout - totalCoinCost - totalGradingCost;
+            const profitShare = Math.max(0.33 * profit, 8 * quantity);
+            const payout = Math.max(0, totalPayout - totalGradingCost - profitShare);
+            
+            // Update the sale with batch and recalculated values
+            await query(`
+              UPDATE sales_transactions
+              SET batch_id = $1, 
+                  coin_cost = $2,
+                  grading_cost = $3,
+                  profit = $4,
+                  profit_share = $5,
+                  payout = $6
+              WHERE transaction_id = $7
+            `, [batch.batch_id, totalCoinCost, totalGradingCost, profit, profitShare, payout, sale.transaction_id]);
+            
+            reassigned++;
+          } else {
+            notFound++;
+          }
+        }
+        
+        // Recalculate batch_coins sold counts
+        await query(`
+          UPDATE batch_coins bc
+          SET total_sold = COALESCE((
+            SELECT SUM(st.quantity_sold)
+            FROM sales_transactions st
+            WHERE st.batch_id = bc.batch_id AND st.coin_type_id = bc.coin_type_id
+              AND COALESCE(st.is_refund, false) = false
+          ), 0)
+        `);
+        
+        return res.json({ 
+          success: true, 
+          reassigned,
+          notFound,
+          message: `Reassigned ${reassigned} sales to batches. ${notFound} could not be matched.`
+        });
+      } catch (error) {
+        console.error('Reassign error:', error);
+        return res.status(500).json({ error: 'Failed to reassign: ' + error.message });
+      }
+    }
+    return res.status(400).json({ error: 'Invalid action' });
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
