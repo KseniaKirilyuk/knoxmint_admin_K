@@ -511,8 +511,9 @@ export default async function handler(req, res) {
                 );
 
                 if (existingContrib.rows.length > 0) {
+                  // REPLACE existing contribution, don't add
                   await query(
-                    'UPDATE user_contributions SET quantity = quantity + $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+                    'UPDATE user_contributions SET quantity = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
                     [quantity, existingContrib.rows[0].id]
                   );
                 } else {
@@ -630,12 +631,12 @@ export default async function handler(req, res) {
             }
             coinTypeTotals[coinTypeId] += quantity;
 
-            // Upsert contribution
+            // Upsert contribution - REPLACE quantity, don't add
             await query(`
               INSERT INTO user_contributions (user_id, batch_id, coin_type_id, quantity)
               VALUES ($1, $2, $3, $4)
               ON CONFLICT (user_id, batch_id, coin_type_id)
-              DO UPDATE SET quantity = user_contributions.quantity + $4, updated_at = CURRENT_TIMESTAMP
+              DO UPDATE SET quantity = $4, updated_at = CURRENT_TIMESTAMP
             `, [userId, batchId, coinTypeId, quantity]);
 
             imported++;
@@ -644,18 +645,28 @@ export default async function handler(req, res) {
           }
         }
 
-        // Update batch_coins totals and cost
+        // Update batch_coins totals - recalculate from actual contributions
         for (const [coinTypeId, total] of Object.entries(coinTypeTotals)) {
           const costPerCoin = coinPrices?.[coinTypeId] || null;
+          
+          // First ensure batch_coins row exists
           await query(`
             INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed, cost_per_coin)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (batch_id, coin_type_id)
-            DO UPDATE SET 
-              total_contributed = batch_coins.total_contributed + $3,
-              cost_per_coin = COALESCE($4, batch_coins.cost_per_coin),
-              updated_at = CURRENT_TIMESTAMP
-          `, [batchId, coinTypeId, total, costPerCoin]);
+            VALUES ($1, $2, 0, $3)
+            ON CONFLICT (batch_id, coin_type_id) DO NOTHING
+          `, [batchId, coinTypeId, costPerCoin]);
+          
+          // Then recalculate total from actual user_contributions
+          await query(`
+            UPDATE batch_coins 
+            SET total_contributed = (
+              SELECT COALESCE(SUM(quantity), 0) FROM user_contributions 
+              WHERE batch_id = $1 AND coin_type_id = $2
+            ),
+            cost_per_coin = COALESCE($3, cost_per_coin),
+            updated_at = CURRENT_TIMESTAMP
+            WHERE batch_id = $1 AND coin_type_id = $2
+          `, [batchId, coinTypeId, costPerCoin]);
         }
 
         return res.json({ success: true, imported, errors: errors.slice(0, 10) });
