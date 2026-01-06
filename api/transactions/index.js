@@ -239,8 +239,15 @@ export default async function handler(req, res) {
 
       let updated = 0;
       
-      for (const [itemTitle, coinTypeId] of Object.entries(mappings)) {
-        if (!coinTypeId) continue;
+      for (const [itemTitle, rawCoinTypeId] of Object.entries(mappings)) {
+        if (!rawCoinTypeId) continue;
+        
+        // Ensure coinTypeId is an integer
+        const coinTypeId = parseInt(rawCoinTypeId);
+        if (isNaN(coinTypeId)) {
+          console.error(`Invalid coinTypeId for "${itemTitle}": ${rawCoinTypeId}`);
+          continue;
+        }
         
         // Get cost_per_coin and grading_cost_per_coin for this coin type from batch_coins
         const batchCoin = await query(`
