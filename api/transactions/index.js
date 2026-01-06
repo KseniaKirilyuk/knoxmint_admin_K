@@ -264,7 +264,10 @@ export default async function handler(req, res) {
         const coinCost = batchCoin.rows.length > 0 ? parseFloat(batchCoin.rows[0].cost_per_coin) || 0 : 0;
         const gradingCost = batchCoin.rows.length > 0 ? parseFloat(batchCoin.rows[0].grading_cost_per_coin) || 0 : 0;
         const totalCostPerCoin = coinCost + gradingCost;
-        const batchId = batchCoin.rows.length > 0 ? batchCoin.rows[0].batch_id : null;
+        const batchId = batchCoin.rows.length > 0 ? parseInt(batchCoin.rows[0].batch_id) : null;
+        
+        // Debug logging
+        console.log(`Mapping "${itemTitle}" -> coinTypeId=${coinTypeId}, batchId=${batchId}, coinCost=${coinCost}, gradingCost=${gradingCost}`);
         
         // Update all sales with this title
         // Profit = Net - Grading cost - Coin cost
@@ -273,15 +276,15 @@ export default async function handler(req, res) {
         const updateResult = await query(`
           UPDATE sales_transactions
           SET 
-            coin_type_id = $1,
-            batch_id = $2,
-            coin_cost = $3 * quantity_sold,
-            profit = total_payout - ($4 * quantity_sold) - ($5 * quantity_sold),
-            profit_share = GREATEST(0.33 * (total_payout - ($4 * quantity_sold) - ($5 * quantity_sold)), 8 * quantity_sold),
-            payout = total_payout - ($4 * quantity_sold) - GREATEST(0.33 * (total_payout - ($4 * quantity_sold) - ($5 * quantity_sold)), 8 * quantity_sold),
+            coin_type_id = $1::integer,
+            batch_id = $2::integer,
+            coin_cost = $3::numeric * quantity_sold,
+            profit = total_payout - ($4::numeric * quantity_sold) - ($5::numeric * quantity_sold),
+            profit_share = GREATEST(0.33 * (total_payout - ($4::numeric * quantity_sold) - ($5::numeric * quantity_sold)), 8 * quantity_sold),
+            payout = total_payout - ($4::numeric * quantity_sold) - GREATEST(0.33 * (total_payout - ($4::numeric * quantity_sold) - ($5::numeric * quantity_sold)), 8 * quantity_sold),
             profit_margin = CASE 
               WHEN sale_price > 0 
-              THEN (total_payout - ($4 * quantity_sold) - ($5 * quantity_sold)) / sale_price
+              THEN (total_payout - ($4::numeric * quantity_sold) - ($5::numeric * quantity_sold)) / sale_price
               ELSE 0 
             END
           WHERE item_title = $6
