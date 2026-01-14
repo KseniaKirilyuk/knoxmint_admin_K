@@ -670,7 +670,13 @@ export default function Sales() {
                       {/* Expanded Detail Row */}
                       {isExpanded && (
                         <tr className="bg-slate-50 border-b">
-                          <td colSpan={13} className="px-4 py-2">
+                          <td colSpan={13} className="px-4 py-3">
+                            {/* Original Title */}
+                            <div className="text-xs text-slate-600 mb-2 pb-2 border-b border-slate-200">
+                              <span className="text-slate-400">Original Title:</span>
+                              <span className="ml-2">{tx.item_title || '-'}</span>
+                            </div>
+                            
                             <div className="flex items-start gap-6 text-xs">
                               {/* Payout Breakdown */}
                               <div>
