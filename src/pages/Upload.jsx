@@ -156,13 +156,13 @@ export default function Upload() {
       const grossCol = findCol(['gross transaction amount'])
       const feeFixedCol = findCol(['final value fee - fixed'])
       const feeVarCol = findCol(['final value fee - variable'])
+      const adsCol = findCol(['ads'])
       const descCol = headers.indexOf('description')
 
       // Parse all rows - keep Order, Refund, Shipping label only
       const orders = []
       const refunds = []
       const shippingByOrder = {}
-      const adsByOrder = {}
 
       for (let i = headerRowIdx + 1; i < rows.length; i++) {
         const row = rows[i]
@@ -182,6 +182,7 @@ export default function Upload() {
             salePrice: parseFloat(String(row[grossCol]).replace(/,/g, '')) || 0,
             ebayFee: Math.abs(parseFloat(String(row[feeFixedCol]).replace(/,/g, '')) || 0) + 
                      Math.abs(parseFloat(String(row[feeVarCol]).replace(/,/g, '')) || 0),
+            advertisingFee: Math.abs(parseFloat(String(row[adsCol]).replace(/,/g, '')) || 0),
             netAmount: parseFloat(String(row[netAmountCol]).replace(/,/g, '')) || 0,
             quantity: parseInt(row[quantityCol]) || 1,
             type: 'order'
@@ -200,11 +201,6 @@ export default function Upload() {
           // Shipping costs - accumulate by order
           const amount = Math.abs(parseFloat(String(row[netAmountCol]).replace(/,/g, '')) || 0)
           shippingByOrder[orderNumber] = (shippingByOrder[orderNumber] || 0) + amount
-        } else if (type === 'Other fee' && orderNumber && orderNumber !== '--') {
-          const desc = String(row[descCol] || '')
-          if (desc.toLowerCase().includes('promoted')) {
-            adsByOrder[orderNumber] = (adsByOrder[orderNumber] || 0) + Math.abs(parseFloat(String(row[netAmountCol]).replace(/,/g, '')) || 0)
-          }
         }
       }
 
@@ -216,14 +212,13 @@ export default function Upload() {
         }
       })
 
-      // Merge shipping, ads, and check for refunds
+      // Merge shipping and check for refunds
       orders.forEach(order => {
         order.shippingCost = shippingByOrder[order.orderNumber] || 0
-        order.advertisingFee = adsByOrder[order.orderNumber] || 0
         
-        // Calculate total payout: net from eBay minus shipping cost
-        // Note: eBay's netAmount already has their fees deducted, but shipping is separate
-        order.totalPayout = order.netAmount - order.shippingCost
+        // Calculate total payout: net from eBay minus shipping cost minus ads
+        // Note: eBay's netAmount already has their fees deducted, but shipping and ads are separate
+        order.totalPayout = order.netAmount - order.shippingCost - order.advertisingFee
         
         // Check if this order was refunded (for display purposes)
         if (refundsByOrder[order.orderNumber]) {
@@ -266,6 +261,7 @@ export default function Upload() {
             revenue: 0, 
             netPayout: 0,
             shippingCost: 0,
+            advertisingFee: 0,
             refundedCount: 0,
             sample: order 
           }
@@ -274,6 +270,7 @@ export default function Upload() {
         titleStats[order.itemTitle].revenue += order.salePrice
         titleStats[order.itemTitle].netPayout += order.totalPayout
         titleStats[order.itemTitle].shippingCost += order.shippingCost || 0
+        titleStats[order.itemTitle].advertisingFee += order.advertisingFee || 0
         
         if (order.isRefunded) {
           titleStats[order.itemTitle].refundedCount++
@@ -289,6 +286,7 @@ export default function Upload() {
           revenue: stats.revenue,
           netPayout: stats.netPayout,
           shippingCost: stats.shippingCost,
+          advertisingFee: stats.advertisingFee,
           refundedCount: stats.refundedCount,
           sample: stats.sample
         }))
@@ -325,6 +323,7 @@ export default function Upload() {
         totalOrders: orders.filter(o => !o.isRefund).length,
         totalRevenue: orders.filter(o => !o.isRefund).reduce((sum, o) => sum + o.salePrice, 0),
         totalShipping: orders.filter(o => !o.isRefund).reduce((sum, o) => sum + (o.shippingCost || 0), 0),
+        totalAds: orders.filter(o => !o.isRefund).reduce((sum, o) => sum + (o.advertisingFee || 0), 0),
         totalNetPayout: orders.filter(o => !o.isRefund).reduce((sum, o) => sum + o.totalPayout, 0),
         refundCount,
         totalRefunds,
@@ -480,7 +479,7 @@ export default function Upload() {
             </div>
             
             {/* Financial Summary */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-3 border-t">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 pt-3 border-t">
               <div className="text-center p-2 bg-slate-50 rounded">
                 <p className="text-xs text-slate-500">Gross Revenue</p>
                 <p className="font-semibold text-slate-900">${parsedData.totalRevenue.toLocaleString()}</p>
@@ -489,6 +488,12 @@ export default function Upload() {
                 <p className="text-xs text-amber-600">Shipping Costs</p>
                 <p className="font-semibold text-amber-700">-${parsedData.totalShipping.toLocaleString()}</p>
               </div>
+              {parsedData.totalAds > 0 && (
+                <div className="text-center p-2 bg-purple-50 rounded">
+                  <p className="text-xs text-purple-600">Ad Fees</p>
+                  <p className="font-semibold text-purple-700">-${parsedData.totalAds.toLocaleString()}</p>
+                </div>
+              )}
               <div className="text-center p-2 bg-emerald-50 rounded">
                 <p className="text-xs text-emerald-600">Net Payout</p>
                 <p className="font-semibold text-emerald-700">${parsedData.totalNetPayout.toLocaleString()}</p>
@@ -549,7 +554,7 @@ export default function Upload() {
             </div>
             
             <div className="divide-y">
-              {parsedData.uniqueTitles.map(({ title, count, revenue, shippingCost, refundedCount }) => {
+              {parsedData.uniqueTitles.map(({ title, count, revenue, shippingCost, advertisingFee, refundedCount }) => {
                 const mapping = titleMappings[title] || {}
                 const isExpanded = expandedTitles[title]
                 const isIncluded = includedTitles[title]
@@ -580,6 +585,7 @@ export default function Upload() {
                         <p className="text-sm text-slate-900 truncate" title={title}>{title}</p>
                         <p className="text-xs text-slate-500 mt-0.5">
                           {count} sold • ${revenue.toLocaleString()} revenue
+                          {advertisingFee > 0 && <span className="text-purple-600"> • -${advertisingFee.toFixed(2)} ads</span>}
                           {shippingCost > 0 && <span className="text-amber-600"> • -${shippingCost.toFixed(2)} shipping</span>}
                           {refundedCount > 0 && <span className="text-red-500"> • {refundedCount} refunded</span>}
                         </p>
