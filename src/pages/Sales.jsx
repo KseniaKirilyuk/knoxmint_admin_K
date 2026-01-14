@@ -198,7 +198,7 @@ export default function Sales() {
   })
 
   const exportCSV = () => {
-    const headers = ['Listing', 'Date Sold', 'Price Sold', 'Net eBay Fee', 'Advertising', 'Shipping', 'Total Payout', 'Coin Cost', 'Profit', 'Profit Share', 'Payout', 'Profit Margin', 'Type', 'Grade', 'Qty']
+    const headers = ['Order Number', 'Date Sold', 'Price Sold', 'Net eBay Fee', 'Advertising', 'Shipping', 'Total Payout', 'Coin Cost', 'Profit', 'Profit Share', 'Payout', 'Profit Margin', 'Type', 'Grade', 'Qty']
     const rows = transactions.map(tx => [
       tx.order_number || tx.listing_id,
       tx.sale_date?.split('T')[0],
@@ -547,7 +547,7 @@ export default function Sales() {
             <thead>
               <tr className="bg-slate-50 border-b">
                 <th className="table-header w-8"></th>
-                <th className="table-header">Listing</th>
+                <th className="table-header">Order Number</th>
                 <th className="table-header">Title</th>
                 <th className="table-header">Date</th>
                 <th className="table-header text-right">Price</th>
@@ -580,7 +580,14 @@ export default function Sales() {
                   const isRefund = tx.is_refund
                   const isRefunded = tx.is_refunded
                   const qty = parseInt(tx.quantity_sold) || 1
-                  const ebayPayout = parseFloat(tx.total_payout) || 0
+                  
+                  // Recalculate payout from individual fees to ensure ads are included
+                  const salePrice = parseFloat(tx.sale_price) || 0
+                  const ebayFee = parseFloat(tx.ebay_fee) || 0
+                  const advertisingFee = parseFloat(tx.advertising_fee) || 0
+                  const shippingCost = parseFloat(tx.shipping_cost) || 0
+                  const ebayPayout = salePrice - ebayFee - advertisingFee - shippingCost
+                  
                   const unitCoinCost = parseFloat(tx.unit_coin_cost) || 0
                   const unitGradingCost = parseFloat(tx.unit_grading_cost) || 0
                   const totalCoinCost = unitCoinCost * qty
@@ -665,8 +672,16 @@ export default function Sales() {
                         <tr className="bg-slate-50 border-b">
                           <td colSpan={13} className="px-4 py-2">
                             <div className="flex items-start gap-6 text-xs">
+                              {/* Payout Breakdown */}
+                              <div>
+                                <span className="text-slate-500">Payout:</span>
+                                <span className="ml-1">
+                                  {formatCurrency(salePrice)} − {formatCurrency(ebayFee)} − {formatCurrency(advertisingFee)} − {formatCurrency(shippingCost)} = <strong>{formatCurrency(ebayPayout)}</strong>
+                                </span>
+                              </div>
+                              
                               {/* Costs */}
-                              <div className="flex gap-4">
+                              <div className="flex gap-4 border-l pl-4">
                                 <div>
                                   <span className="text-slate-500">Coin Cost:</span>
                                   <span className="ml-1">{formatCurrency(unitCoinCost)} ×{qty} = <strong>{formatCurrency(totalCoinCost)}</strong></span>
