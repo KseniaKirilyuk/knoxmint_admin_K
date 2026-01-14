@@ -9,7 +9,9 @@ import Users from './pages/Users'
 import Batches from './pages/Batches'
 import Upload from './pages/Upload'
 import Settings from './pages/Settings'
+import RefundAlerts from './pages/RefundAlerts'
 import { AuthProvider, useAuth } from './hooks/useAuth'
+
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -50,6 +52,7 @@ function AppRoutes() {
         <Route path="batches" element={<Batches />} />
         <Route path="upload" element={<Upload />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="/refunds" element={<RefundAlerts />} />
       </Route>
     </Routes>
   )
