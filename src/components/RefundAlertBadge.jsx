@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import api from '../lib/api'
-import RefundAlertBadge from './RefundAlertBadge'
 import { AlertTriangle } from 'lucide-react'
 
 // Small badge component to show pending refund alerts count
@@ -44,8 +43,3 @@ export default function RefundAlertBadge() {
 //   Refund Alerts
 //   <RefundAlertBadge />
 // </NavLink>
-<NavLink to="/refunds" className="nav-link flex items-center">
-  <AlertTriangle className="w-5 h-5 mr-3" />
-  Refund Alerts
-  <RefundAlertBadge />
-</NavLink>

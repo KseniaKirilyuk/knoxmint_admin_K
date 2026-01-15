@@ -7,8 +7,10 @@ import {
   Package, 
   Upload, 
   Settings,
-  Coins
+  Coins,
+  AlertTriangle
 } from 'lucide-react'
+import RefundAlertBadge from '../RefundAlertBadge'
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -17,6 +19,7 @@ const navigation = [
   { name: 'Users', href: '/users', icon: Users },
   { name: 'Batches', href: '/batches', icon: Package },
   { name: 'Import Sales', href: '/upload', icon: Upload },
+  { name: 'Refund Alerts', href: '/refunds', icon: AlertTriangle, badge: true },
   { name: 'Settings', href: '/settings', icon: Settings },
 ]
 
@@ -50,6 +53,7 @@ export default function Sidebar() {
           >
             <item.icon className="w-5 h-5" />
             {item.name}
+            {item.badge && <RefundAlertBadge />}
           </NavLink>
         ))}
       </nav>
