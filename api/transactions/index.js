@@ -182,41 +182,69 @@ export default async function handler(req, res) {
       
       // Single transaction edit
       if (transactionId) {
-        const { coinTypeId, saleDate, salePrice, ebayFee, advertisingFee, shippingCost, coinCost, grade, quantitySold } = req.body;
+        const { batchId, coinTypeId, saleDate, salePrice, ebayFee, advertisingFee, shippingCost, coinCost, grade, quantitySold } = req.body;
+        
+        // Get old batch_id to update sold counts later
+        const oldTx = await query('SELECT batch_id, coin_type_id, quantity_sold FROM sales_transactions WHERE transaction_id = $1', [transactionId]);
+        const oldBatchId = oldTx.rows[0]?.batch_id;
+        const oldCoinTypeId = oldTx.rows[0]?.coin_type_id;
+        const oldQty = oldTx.rows[0]?.quantity_sold || 1;
+        
+        // Get costs from new batch if batch is assigned
+        let actualCoinCost = parseFloat(coinCost) || 0;
+        let gradingCost = 0;
+        
+        if (batchId && coinTypeId) {
+          const batchCoinResult = await query(`
+            SELECT cost_per_coin, grading_cost_per_coin 
+            FROM batch_coins WHERE batch_id = $1 AND coin_type_id = $2
+          `, [batchId, coinTypeId]);
+          
+          if (batchCoinResult.rows.length > 0) {
+            const qty = parseInt(quantitySold) || 1;
+            actualCoinCost = (parseFloat(batchCoinResult.rows[0].cost_per_coin) || 0) * qty;
+            gradingCost = (parseFloat(batchCoinResult.rows[0].grading_cost_per_coin) || 0) * qty;
+          }
+        }
         
         // Calculate derived values
+        const qty = parseInt(quantitySold) || 1;
         const totalPayout = (parseFloat(salePrice) || 0) - (parseFloat(ebayFee) || 0) - (parseFloat(advertisingFee) || 0) - (parseFloat(shippingCost) || 0);
-        const profit = totalPayout - (parseFloat(coinCost) || 0);
-        const profitShare = profit > 0 ? Math.max(0.33 * profit, 8) : 0;
-        const memberPayout = profit > 0 ? profit - profitShare : 0;
+        const profit = totalPayout - actualCoinCost - gradingCost;
+        const profitShare = Math.max(0.33 * profit, 8 * qty);
+        const memberPayout = Math.max(0, totalPayout - gradingCost - profitShare);
         const profitMargin = parseFloat(salePrice) > 0 ? profit / parseFloat(salePrice) : 0;
         
         await query(`
           UPDATE sales_transactions
           SET 
-            coin_type_id = $1,
-            sale_date = $2,
-            sale_price = $3,
-            ebay_fee = $4,
-            advertising_fee = $5,
-            shipping_cost = $6,
-            coin_cost = $7,
-            grade = $8,
-            quantity_sold = $9,
-            total_payout = $10,
-            profit = $11,
-            profit_share = $12,
-            payout = $13,
-            profit_margin = $14
-          WHERE transaction_id = $15
+            batch_id = $1,
+            coin_type_id = $2,
+            sale_date = $3,
+            sale_price = $4,
+            ebay_fee = $5,
+            advertising_fee = $6,
+            shipping_cost = $7,
+            coin_cost = $8,
+            grading_cost = $9,
+            grade = $10,
+            quantity_sold = $11,
+            total_payout = $12,
+            profit = $13,
+            profit_share = $14,
+            payout = $15,
+            profit_margin = $16
+          WHERE transaction_id = $17
         `, [
+          batchId || null,
           coinTypeId || null,
           saleDate,
           salePrice,
           ebayFee,
           advertisingFee,
           shippingCost,
-          coinCost,
+          actualCoinCost,
+          gradingCost,
           grade || null,
           quantitySold,
           totalPayout,
@@ -226,6 +254,24 @@ export default async function handler(req, res) {
           profitMargin,
           transactionId
         ]);
+        
+        // Update batch_coins sold counts if batch changed
+        if (oldBatchId !== (batchId ? parseInt(batchId) : null) || oldCoinTypeId !== (coinTypeId ? parseInt(coinTypeId) : null)) {
+          // Decrease old batch count
+          if (oldBatchId && oldCoinTypeId) {
+            await query(`
+              UPDATE batch_coins SET total_sold = GREATEST(0, total_sold - $1)
+              WHERE batch_id = $2 AND coin_type_id = $3
+            `, [oldQty, oldBatchId, oldCoinTypeId]);
+          }
+          // Increase new batch count
+          if (batchId && coinTypeId) {
+            await query(`
+              UPDATE batch_coins SET total_sold = total_sold + $1
+              WHERE batch_id = $2 AND coin_type_id = $3
+            `, [qty, batchId, coinTypeId]);
+          }
+        }
         
         return res.json({ success: true });
       }
@@ -301,7 +347,8 @@ export default async function handler(req, res) {
         SET total_sold = (
           SELECT COALESCE(SUM(st.quantity_sold), 0)
           FROM sales_transactions st
-          WHERE st.coin_type_id = bc.coin_type_id
+          WHERE st.batch_id = bc.batch_id
+            AND st.coin_type_id = bc.coin_type_id
             AND COALESCE(st.is_refund, false) = false
         )
       `);
@@ -450,7 +497,8 @@ export default async function handler(req, res) {
         SET total_sold = (
           SELECT COALESCE(SUM(st.quantity_sold), 0)
           FROM sales_transactions st
-          WHERE st.coin_type_id = bc.coin_type_id
+          WHERE st.batch_id = bc.batch_id
+            AND st.coin_type_id = bc.coin_type_id
             AND COALESCE(st.is_refund, false) = false
         )
         WHERE bc.coin_type_id = $1

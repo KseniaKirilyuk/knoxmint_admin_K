@@ -287,6 +287,7 @@ export default function Sales() {
   const openEditModal = (tx) => {
     setEditingTx(tx)
     setEditForm({
+      batchId: tx.batch_id || '',
       coinTypeId: tx.coin_type_id || '',
       saleDate: tx.sale_date ? tx.sale_date.split('T')[0] : '',
       salePrice: parseFloat(tx.sale_price || 0).toFixed(2),
@@ -303,6 +304,7 @@ export default function Sales() {
   const handleSaveEdit = async () => {
     try {
       await api.put(`/transactions?transactionId=${editingTx.transaction_id}`, {
+        batchId: editForm.batchId || null,
         coinTypeId: editForm.coinTypeId || null,
         saleDate: editForm.saleDate,
         salePrice: parseFloat(editForm.salePrice) || 0,
@@ -882,6 +884,25 @@ export default function Sales() {
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="label">Batch Assignment</label>
+                <select
+                  className="input"
+                  value={editForm.batchId}
+                  onChange={(e) => setEditForm({ ...editForm, batchId: e.target.value })}
+                >
+                  <option value="">-- Not Assigned (Unassign) --</option>
+                  {batches.map(b => (
+                    <option key={b.batch_id} value={b.batch_id}>
+                      {b.batch_name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500 mt-1">
+                  Changing batch will recalculate costs based on new batch pricing
+                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-4">

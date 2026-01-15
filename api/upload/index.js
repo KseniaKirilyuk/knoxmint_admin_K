@@ -495,7 +495,9 @@ export default async function handler(req, res) {
       SET total_sold = (
         SELECT COALESCE(SUM(st.quantity_sold), 0)
         FROM sales_transactions st
-        WHERE st.coin_type_id = bc.coin_type_id
+        WHERE st.batch_id = bc.batch_id 
+          AND st.coin_type_id = bc.coin_type_id
+          AND COALESCE(st.is_refund, false) = false
       )
     `);
 
