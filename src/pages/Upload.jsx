@@ -471,7 +471,10 @@ export default function Upload() {
                 <div>
                   <p className="font-medium text-slate-900">{parsedData.filename}</p>
                   <p className="text-sm text-slate-500">
-                    {parsedData.totalOrders} orders • {parsedData.uniqueTitles.length} unique items
+                    {parsedData.totalOrders > 0 
+                      ? `${parsedData.totalOrders} orders • ${parsedData.uniqueTitles.length} unique items`
+                      : `${refundOrders} refund${refundOrders !== 1 ? 's' : ''} to process`
+                    }
                   </p>
                 </div>
               </div>
@@ -527,6 +530,12 @@ export default function Upload() {
               <span className="text-knox-700 font-medium">{includedOrders}</span>
               <span className="text-knox-600 text-sm ml-1">orders to import</span>
             </div>
+            {refundOrders > 0 && (
+              <div className="px-4 py-2 bg-red-50 rounded-lg">
+                <span className="text-red-700 font-medium">{refundOrders}</span>
+                <span className="text-red-600 text-sm ml-1">refund{refundOrders !== 1 ? 's' : ''} to process</span>
+              </div>
+            )}
           </div>
 
           {/* Title Mappings */}
@@ -536,22 +545,45 @@ export default function Upload() {
                 <h3 className="font-medium">Select Items to Import</h3>
                 <p className="text-sm text-slate-500">Uncheck non-coin items (auto-detected). Then configure coin type mapping.</p>
               </div>
-              <div className="flex gap-2">
-                <button 
-                  onClick={() => setIncludedTitles(Object.fromEntries(parsedData.uniqueTitles.map(t => [t.title, true])))}
-                  className="text-xs text-knox-600 hover:underline"
-                >
-                  Select all
-                </button>
-                <span className="text-slate-300">|</span>
-                <button 
-                  onClick={() => setIncludedTitles(Object.fromEntries(parsedData.uniqueTitles.map(t => [t.title, false])))}
-                  className="text-xs text-slate-500 hover:underline"
-                >
-                  Clear all
-                </button>
-              </div>
+              {parsedData.uniqueTitles.length > 0 && (
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => setIncludedTitles(Object.fromEntries(parsedData.uniqueTitles.map(t => [t.title, true])))}
+                    className="text-xs text-knox-600 hover:underline"
+                  >
+                    Select all
+                  </button>
+                  <span className="text-slate-300">|</span>
+                  <button 
+                    onClick={() => setIncludedTitles(Object.fromEntries(parsedData.uniqueTitles.map(t => [t.title, false])))}
+                    className="text-xs text-slate-500 hover:underline"
+                  >
+                    Clear all
+                  </button>
+                </div>
+              )}
             </div>
+            
+            {/* Refund-only file notice */}
+            {parsedData.uniqueTitles.length === 0 && refundOrders > 0 && (
+              <div className="p-6 text-center">
+                <div className="inline-flex items-center justify-center w-12 h-12 bg-red-100 rounded-full mb-3">
+                  <AlertCircle className="w-6 h-6 text-red-600" />
+                </div>
+                <h4 className="font-medium text-slate-900 mb-2">Refund-Only File Detected</h4>
+                <p className="text-sm text-slate-600 mb-4">
+                  This file contains {refundOrders} refund{refundOrders !== 1 ? 's' : ''} and no new sales.
+                </p>
+                <div className="bg-slate-50 rounded-lg p-4 text-left max-w-md mx-auto">
+                  <p className="text-sm text-slate-700 mb-2"><strong>Refunds will:</strong></p>
+                  <ul className="text-sm text-slate-600 space-y-1">
+                    <li>• Find and mark original sales as refunded</li>
+                    <li>• Return coins to batch inventory for resale</li>
+                    <li>• Create alerts if batch payouts were already made</li>
+                  </ul>
+                </div>
+              </div>
+            )}
             
             <div className="divide-y">
               {parsedData.uniqueTitles.map(({ title, count, revenue, shippingCost, advertisingFee, refundedCount }) => {
@@ -711,10 +743,14 @@ export default function Upload() {
             <button onClick={reset} className="btn btn-secondary">Cancel</button>
             <button 
               onClick={handleImport} 
-              disabled={importing || includedOrders === 0} 
+              disabled={importing || (includedOrders === 0 && refundOrders === 0)} 
               className="btn btn-primary"
             >
-              {importing ? 'Importing...' : `Import ${includedOrders} Orders${refundOrders > 0 ? ` + ${refundOrders} Refunds` : ''}`}
+              {importing ? 'Importing...' : 
+                includedOrders > 0 
+                  ? `Import ${includedOrders} Orders${refundOrders > 0 ? ` + ${refundOrders} Refunds` : ''}`
+                  : `Process ${refundOrders} Refund${refundOrders !== 1 ? 's' : ''}`
+              }
             </button>
           </div>
         </div>
