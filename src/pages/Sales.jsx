@@ -596,30 +596,35 @@ export default function Sales() {
                   const totalGradingCost = unitGradingCost * qty
                   const profit = ebayPayout - totalGradingCost - totalCoinCost
                   const adminShare = Math.max(0.33 * profit, 8 * qty)
-                  const memberPayout = Math.max(0, ebayPayout - totalGradingCost - adminShare)
+                  // Refunded sales show $0 payout
+                  const memberPayout = isRefunded ? 0 : Math.max(0, ebayPayout - totalGradingCost - adminShare)
                   const isUngraded = tx.is_ungraded || tx.coin_type_name?.includes('(Ungraded)')
+                  
+                  // Styling for refunded rows - greyed out and strikethrough
+                  const refundedStyle = isRefunded ? 'opacity-50' : ''
+                  const refundedTextStyle = isRefunded ? 'line-through text-slate-400' : ''
                   
                   return (
                     <React.Fragment key={tx.transaction_id}>
                       {/* Main Row */}
                       <tr 
-                        className={`hover:bg-slate-50 cursor-pointer ${isRefund ? 'bg-red-50' : isRefunded ? 'bg-orange-50' : ''} ${isExpanded ? 'bg-knox-50/50' : ''}`}
+                        className={`hover:bg-slate-50 cursor-pointer ${isRefund ? 'bg-red-50' : isRefunded ? 'bg-slate-100' : ''} ${isExpanded ? 'bg-knox-50/50' : ''} ${refundedStyle}`}
                         onClick={() => toggleRow(tx.transaction_id)}
                       >
                         <td className="table-cell">
                           <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                         </td>
                         <td className="table-cell font-mono text-xs">
-                          {tx.order_number || tx.listing_id || '-'}
+                          <span className={refundedTextStyle}>{tx.order_number || tx.listing_id || '-'}</span>
                           {isRefund && <span className="ml-1 px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-[10px] font-medium">REFUND</span>}
-                          {isRefunded && <span className="ml-1 px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded text-[10px] font-medium">REFUNDED</span>}
+                          {isRefunded && <span className="ml-1 px-1.5 py-0.5 bg-slate-200 text-slate-600 rounded text-[10px] font-medium">REFUNDED</span>}
                         </td>
                         <td className="table-cell max-w-xs">
                           <div className="flex items-center gap-1.5">
-                            <span className="truncate text-slate-700" title={tx.item_title}>
+                            <span className={`truncate ${isRefunded ? 'text-slate-400 line-through' : 'text-slate-700'}`} title={tx.item_title}>
                               {tx.coin_type_name || tx.item_title || '-'}
                             </span>
-                            {tx.coin_type_name && (
+                            {tx.coin_type_name && !isRefunded && (
                               isUngraded ? (
                                 <span className="flex-shrink-0 px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-[10px] font-medium">UG</span>
                               ) : (
@@ -628,26 +633,26 @@ export default function Sales() {
                             )}
                           </div>
                         </td>
-                        <td className="table-cell whitespace-nowrap">
+                        <td className={`table-cell whitespace-nowrap ${refundedTextStyle}`}>
                           {tx.sale_date?.split('T')[0]}
                         </td>
-                        <td className="table-cell text-right">{formatCurrency(tx.sale_price)}</td>
-                        <td className="table-cell text-right text-red-600">{formatCurrency(-Math.abs(tx.ebay_fee))}</td>
-                        <td className="table-cell text-right text-red-600">{tx.advertising_fee > 0 ? formatCurrency(-tx.advertising_fee) : '-'}</td>
-                        <td className="table-cell text-right text-amber-600">{tx.shipping_cost > 0 ? formatCurrency(-tx.shipping_cost) : '-'}</td>
-                        <td className="table-cell text-right font-medium">{formatCurrency(ebayPayout)}</td>
+                        <td className={`table-cell text-right ${refundedTextStyle}`}>{isRefunded ? '$0.00' : formatCurrency(tx.sale_price)}</td>
+                        <td className={`table-cell text-right ${isRefunded ? 'text-slate-400' : 'text-red-600'}`}>{isRefunded ? '-' : formatCurrency(-Math.abs(tx.ebay_fee))}</td>
+                        <td className={`table-cell text-right ${isRefunded ? 'text-slate-400' : 'text-red-600'}`}>{isRefunded ? '-' : (tx.advertising_fee > 0 ? formatCurrency(-tx.advertising_fee) : '-')}</td>
+                        <td className={`table-cell text-right ${isRefunded ? 'text-slate-400' : 'text-amber-600'}`}>{isRefunded ? '-' : (tx.shipping_cost > 0 ? formatCurrency(-tx.shipping_cost) : '-')}</td>
+                        <td className={`table-cell text-right font-medium ${refundedTextStyle}`}>{isRefunded ? '$0.00' : formatCurrency(ebayPayout)}</td>
                         <td className="table-cell">
                           {tx.batch_name ? (
-                            <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-xs">
+                            <span className={`px-2 py-0.5 rounded text-xs ${isRefunded ? 'bg-slate-100 text-slate-400' : 'bg-slate-100 text-slate-700'}`}>
                               {tx.batch_name}
                             </span>
                           ) : (
                             <span className="text-amber-600 text-xs">Not mapped</span>
                           )}
                         </td>
-                        <td className="table-cell text-center">{qty}</td>
-                        <td className={`table-cell text-right font-medium ${memberPayout > 0 ? 'text-emerald-600' : 'text-slate-500'}`}>
-                          {formatCurrency(memberPayout)}
+                        <td className={`table-cell text-center ${refundedTextStyle}`}>{isRefunded ? '-' : qty}</td>
+                        <td className={`table-cell text-right font-medium ${isRefunded ? 'text-slate-400' : memberPayout > 0 ? 'text-emerald-600' : 'text-slate-500'}`}>
+                          {isRefunded ? '$0.00' : formatCurrency(memberPayout)}
                         </td>
                         <td className="table-cell" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center gap-1">

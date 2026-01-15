@@ -119,19 +119,18 @@ export default async function handler(req, res) {
         WHERE coin_type_id IS NULL AND COALESCE(is_refund, false) = false
       `);
 
-      // Get summary stats - apply same filters
+      // Get summary stats - apply same filters (exclude refunds AND refunded sales)
       let summarySql = `
         SELECT 
-          COUNT(*) FILTER (WHERE COALESCE(is_refund, false) = false) as total_transactions,
-          COUNT(*) FILTER (WHERE is_refund = true) as refund_count,
-          COALESCE(SUM(sale_price) FILTER (WHERE COALESCE(is_refund, false) = false), 0) as total_revenue,
-          COALESCE(SUM(shipping_cost) FILTER (WHERE COALESCE(is_refund, false) = false), 0) as total_shipping,
-          COALESCE(SUM(profit), 0) as total_profit,
-          COALESCE(SUM(profit_share), 0) as total_profit_share,
-          COALESCE(SUM(payout), 0) as total_payout,
-          COALESCE(SUM(quantity_sold) FILTER (WHERE COALESCE(is_refund, false) = false), 0) as total_coins_sold,
-          COALESCE(SUM(payout) FILTER (WHERE is_refund = true), 0) as refund_total,
-          COALESCE(SUM(coin_cost) FILTER (WHERE COALESCE(is_refund, false) = false), 0) as total_cost
+          COUNT(*) FILTER (WHERE COALESCE(is_refund, false) = false AND COALESCE(is_refunded, false) = false) as total_transactions,
+          COUNT(*) FILTER (WHERE is_refunded = true) as refund_count,
+          COALESCE(SUM(sale_price) FILTER (WHERE COALESCE(is_refund, false) = false AND COALESCE(is_refunded, false) = false), 0) as total_revenue,
+          COALESCE(SUM(shipping_cost) FILTER (WHERE COALESCE(is_refund, false) = false AND COALESCE(is_refunded, false) = false), 0) as total_shipping,
+          COALESCE(SUM(profit) FILTER (WHERE COALESCE(is_refund, false) = false AND COALESCE(is_refunded, false) = false), 0) as total_profit,
+          COALESCE(SUM(profit_share) FILTER (WHERE COALESCE(is_refund, false) = false AND COALESCE(is_refunded, false) = false), 0) as total_profit_share,
+          COALESCE(SUM(payout) FILTER (WHERE COALESCE(is_refund, false) = false AND COALESCE(is_refunded, false) = false), 0) as total_payout,
+          COALESCE(SUM(quantity_sold) FILTER (WHERE COALESCE(is_refund, false) = false AND COALESCE(is_refunded, false) = false), 0) as total_coins_sold,
+          COALESCE(SUM(coin_cost) FILTER (WHERE COALESCE(is_refund, false) = false AND COALESCE(is_refunded, false) = false), 0) as total_cost
         FROM sales_transactions
         WHERE 1=1
       `;

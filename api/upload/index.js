@@ -209,147 +209,92 @@ export default async function handler(req, res) {
 
     for (const tx of transactions) {
       try {
-        // Handle refund transactions (negative payout, offset previous sales)
+        // Handle refund transactions - just mark original sale as refunded, no new transaction
         if (tx.isRefund || tx.type === 'refund') {
-          // Check if this refund already exists
-          if (tx.orderNumber) {
-            const existing = await query(
-              'SELECT transaction_id FROM sales_transactions WHERE order_number = $1 AND is_refund = true',
-              [tx.orderNumber]
-            );
-            if (existing.rows.length > 0) {
-              skipped++;
-              continue;
-            }
+          // Skip if no order number - can't find original
+          if (!tx.orderNumber) {
+            skipped++;
+            continue;
           }
           
-          // STEP 2: Find original sale by order_number
-          let originalSale = null;
-          let alertType = 'orphan'; // default
-          let batchId = null;
-          let coinTypeId = null;
+          // Find original sale by order_number
+          const originalResult = await query(
+            `SELECT st.*, b.batch_name 
+             FROM sales_transactions st 
+             LEFT JOIN batches b ON st.batch_id = b.batch_id
+             WHERE st.order_number = $1 
+               AND (st.is_refund IS NULL OR st.is_refund = false)
+               AND (st.is_refunded IS NULL OR st.is_refunded = false)
+             LIMIT 1`,
+            [tx.orderNumber]
+          );
+          
+          // No original found or already refunded - skip
+          if (originalResult.rows.length === 0) {
+            skipped++;
+            continue;
+          }
+          
+          const originalSale = originalResult.rows[0];
+          const coinTypeId = originalSale.coin_type_id;
+          const batchId = originalSale.batch_id;
+          const originalPayout = parseFloat(originalSale.payout) || 0;
+          
+          // Determine alert type
+          let alertType = 'unmapped';
           let batchWasPaid = false;
           let suggestion = null;
           
-          if (tx.orderNumber) {
-            const originalResult = await query(
-              `SELECT st.*, b.batch_name 
-               FROM sales_transactions st 
-               LEFT JOIN batches b ON st.batch_id = b.batch_id
-               WHERE st.order_number = $1 AND (st.is_refund IS NULL OR st.is_refund = false) 
-               LIMIT 1`,
-              [tx.orderNumber]
+          if (batchId) {
+            // Check if any member who contributed to this batch was paid
+            const batchPayouts = await query(
+              `SELECT COUNT(*) as count FROM payouts p
+               JOIN user_contributions uc ON p.user_id = uc.user_id
+               WHERE uc.batch_id = $1 AND p.status = 'Paid'`,
+              [batchId]
             );
             
-            if (originalResult.rows.length > 0) {
-              originalSale = originalResult.rows[0];
-              coinTypeId = originalSale.coin_type_id;
-              batchId = originalSale.batch_id;
-              
-              if (!batchId) {
-                // Found but no batch - unmapped sale
-                alertType = 'unmapped';
-              } else {
-                // Found with batch - check if batch has payouts
-                const payoutsResult = await query(
-                  `SELECT COUNT(*) as paid_count FROM payouts WHERE status = 'Paid'`
-                );
-                // Check if any member who contributed to this batch was paid
-                const batchPayouts = await query(
-                  `SELECT COUNT(*) as count FROM payouts p
-                   JOIN user_contributions uc ON p.user_id = uc.user_id
-                   WHERE uc.batch_id = $1 AND p.status = 'Paid'`,
-                  [batchId]
-                );
-                
-                batchWasPaid = parseInt(batchPayouts.rows[0]?.count) > 0;
-                alertType = batchWasPaid ? 'paid_batch' : 'unpaid_batch';
-              }
-            }
-            // else: not found, stays 'orphan'
-          }
-          
-          // Calculate refund amount (should be negative)
-          const refundAmount = parseFloat(tx.totalPayout) || 0;
-          
-          // Insert refund transaction
-          const refundResult = await query(`
-            INSERT INTO sales_transactions (
-              order_number, item_title, sale_date, sale_price, total_payout,
-              profit, payout, coin_type_id, batch_id, is_refund, imported_from
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true, 'ebay_upload')
-            RETURNING transaction_id
-          `, [
-            tx.orderNumber || null,
-            tx.itemTitle || 'Refund',
-            tx.saleDate || new Date().toISOString().split('T')[0],
-            0,
-            refundAmount,
-            refundAmount,
-            refundAmount,
-            coinTypeId,
-            batchId
-          ]);
-          
-          const refundTransactionId = refundResult.rows[0].transaction_id;
-          
-          // Mark original sale as refunded
-          if (originalSale) {
-            await query(
-              'UPDATE sales_transactions SET is_refunded = true WHERE transaction_id = $1',
-              [originalSale.transaction_id]
-            );
-          }
-          
-          // For unpaid_batch or paid_batch: decrease batch_coins.total_sold
-          if (batchId && coinTypeId && (alertType === 'unpaid_batch' || alertType === 'paid_batch')) {
+            batchWasPaid = parseInt(batchPayouts.rows[0]?.count) > 0;
+            alertType = batchWasPaid ? 'paid_batch' : 'unpaid_batch';
+            
+            // Decrease batch_coins.total_sold - coin goes back to inventory
             await query(
               `UPDATE batch_coins SET total_sold = GREATEST(0, total_sold - 1) 
                WHERE batch_id = $1 AND coin_type_id = $2`,
               [batchId, coinTypeId]
             );
             
-            // Look for unassigned sales of this coin type to suggest
-            const unassignedSales = await query(
-              `SELECT COUNT(*) as count FROM sales_transactions 
-               WHERE coin_type_id = $1 AND batch_id IS NULL 
-               AND (is_refund IS NULL OR is_refund = false)
-               AND (is_refunded IS NULL OR is_refunded = false)`,
-              [coinTypeId]
-            );
-            
-            const unassignedCount = parseInt(unassignedSales.rows[0]?.count) || 0;
-            if (unassignedCount > 0) {
-              suggestion = `${unassignedCount} unassigned sale(s) of this coin type available to assign to batch`;
-            } else {
-              suggestion = 'No unassigned coins available - waiting for resale';
-            }
+            suggestion = 'Coin returned to batch inventory for resale';
           }
           
-          // Create refund alert
-          await query(`
+          // Mark original sale as refunded (keeps history but excluded from calculations)
+          await query(
+            'UPDATE sales_transactions SET is_refunded = true WHERE transaction_id = $1',
+            [originalSale.transaction_id]
+          );
+          
+          // Create refund alert for admin visibility
+          const alertResult = await query(`
             INSERT INTO refund_alerts (
-              refund_transaction_id, original_transaction_id, batch_id, coin_type_id,
+              original_transaction_id, batch_id, coin_type_id,
               order_number, refund_amount, alert_type, batch_was_paid, suggestion
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING alert_id
           `, [
-            refundTransactionId,
-            originalSale?.transaction_id || null,
+            originalSale.transaction_id,
             batchId,
             coinTypeId,
             tx.orderNumber,
-            refundAmount,
+            0, // No negative amount - refund = $0
             alertType,
             batchWasPaid,
             suggestion
           ]);
           
-          const alertId = (await query('SELECT lastval()')).rows[0].lastval;
+          const alertId = alertResult.rows[0].alert_id;
           
-          // For paid_batch: create member adjustments
+          // For paid_batch: create member adjustments (they need to return their payout)
           if (alertType === 'paid_batch' && batchId && coinTypeId) {
-            // Get all contributors for this coin type in this batch
             const contributors = await query(`
               SELECT uc.user_id, uc.quantity,
                      (SELECT SUM(quantity) FROM user_contributions 
@@ -358,13 +303,10 @@ export default async function handler(req, res) {
               WHERE uc.batch_id = $1 AND uc.coin_type_id = $2
             `, [batchId, coinTypeId]);
             
-            // Calculate the member payout that was paid (need to reverse it)
-            // Using the original sale's payout value
-            const originalPayout = parseFloat(originalSale?.payout) || Math.abs(refundAmount) * 0.67; // estimate if not available
-            
             for (const contrib of contributors.rows) {
               const totalContributed = parseInt(contrib.total_contributed) || 1;
               const sharePct = (parseInt(contrib.quantity) / totalContributed) * 100;
+              // Amount owed back (negative = they owe this)
               const owedAmount = -Math.abs(originalPayout * (contrib.quantity / totalContributed));
               
               await query(`
