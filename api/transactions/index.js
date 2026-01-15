@@ -15,7 +15,7 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === 'GET') {
-      const { action, batchId, coinTypeId, startDate, endDate, limit = 50, offset = 0 } = req.query;
+      const { action, batchId, coinTypeId, startDate, endDate, search, refundStatus = 'active', limit = 50, offset = 0 } = req.query;
 
       // Get unique unmapped titles for bulk mapping - check this FIRST
       if (action === 'unmappedTitles') {
@@ -76,6 +76,18 @@ export default async function handler(req, res) {
         params.push(endDate);
         paramIndex++;
       }
+      if (search) {
+        sql += ` AND (st.order_number ILIKE $${paramIndex} OR st.listing_id ILIKE $${paramIndex} OR st.item_title ILIKE $${paramIndex})`;
+        params.push(`%${search}%`);
+        paramIndex++;
+      }
+      // Refund status filter
+      if (refundStatus === 'active') {
+        sql += ` AND COALESCE(st.is_refunded, false) = false AND COALESCE(st.is_refund, false) = false`;
+      } else if (refundStatus === 'refunded') {
+        sql += ` AND st.is_refunded = true`;
+      }
+      // 'all' shows everything
 
       sql += ` ORDER BY st.sale_date DESC, st.transaction_id DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
       params.push(parseInt(limit), parseInt(offset));
@@ -108,6 +120,17 @@ export default async function handler(req, res) {
         countSql += ` AND sale_date <= $${countParamIndex}`;
         countParams.push(endDate);
         countParamIndex++;
+      }
+      if (search) {
+        countSql += ` AND (order_number ILIKE $${countParamIndex} OR listing_id ILIKE $${countParamIndex} OR item_title ILIKE $${countParamIndex})`;
+        countParams.push(`%${search}%`);
+        countParamIndex++;
+      }
+      // Refund status filter
+      if (refundStatus === 'active') {
+        countSql += ` AND COALESCE(is_refunded, false) = false AND COALESCE(is_refund, false) = false`;
+      } else if (refundStatus === 'refunded') {
+        countSql += ` AND is_refunded = true`;
       }
       
       const countResult = await query(countSql, countParams);
@@ -159,6 +182,11 @@ export default async function handler(req, res) {
         summaryParams.push(endDate);
         summaryParamIndex++;
       }
+      if (search) {
+        summarySql += ` AND (order_number ILIKE $${summaryParamIndex} OR listing_id ILIKE $${summaryParamIndex} OR item_title ILIKE $${summaryParamIndex})`;
+        summaryParams.push(`%${search}%`);
+        summaryParamIndex++;
+      }
       
       const summaryResult = await query(summarySql, summaryParams);
 
@@ -169,7 +197,7 @@ export default async function handler(req, res) {
         offset: parseInt(offset),
         summary: summaryResult.rows[0],
         unmappedCount: parseInt(unmappedResult.rows[0].unmapped_count),
-        filtered: !!(coinTypeId || startDate || endDate || batchId)
+        filtered: !!(coinTypeId || startDate || endDate || batchId || search || refundStatus !== 'active')
       });
     }
 

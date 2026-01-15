@@ -13,7 +13,9 @@ export default function Sales() {
   const [filters, setFilters] = useState({
     coinTypeId: '',
     startDate: '',
-    endDate: ''
+    endDate: '',
+    search: '',
+    refundStatus: 'active' // 'all', 'active', 'refunded'
   })
   const [pagination, setPagination] = useState({
     total: 0,
@@ -102,6 +104,8 @@ export default function Sales() {
       if (filters.coinTypeId) params.append('coinTypeId', filters.coinTypeId)
       if (filters.startDate) params.append('startDate', filters.startDate)
       if (filters.endDate) params.append('endDate', filters.endDate)
+      if (filters.search) params.append('search', filters.search)
+      if (filters.refundStatus) params.append('refundStatus', filters.refundStatus)
 
       const response = await api.get(`/transactions?${params}`)
       setTransactions(response.data.transactions)
@@ -528,10 +532,34 @@ export default function Sales() {
             value={filters.endDate}
             onChange={(e) => handleFilterChange('endDate', e.target.value)}
           />
-          {(filters.coinTypeId || filters.startDate || filters.endDate) && (
+          
+          {/* Search by order number */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search order #..."
+              className="input pl-9 w-40"
+              value={filters.search}
+              onChange={(e) => handleFilterChange('search', e.target.value)}
+            />
+          </div>
+          
+          {/* Refund status filter */}
+          <select
+            className="input w-auto"
+            value={filters.refundStatus}
+            onChange={(e) => handleFilterChange('refundStatus', e.target.value)}
+          >
+            <option value="active">Active Sales</option>
+            <option value="refunded">Refunded Only</option>
+            <option value="all">All (incl. Refunded)</option>
+          </select>
+          
+          {(filters.coinTypeId || filters.startDate || filters.endDate || filters.search || filters.refundStatus !== 'active') && (
             <button 
               onClick={() => {
-                setFilters({ coinTypeId: '', startDate: '', endDate: '' })
+                setFilters({ coinTypeId: '', startDate: '', endDate: '', search: '', refundStatus: 'active' })
                 setSelectedCoinName('All Coin Types')
               }}
               className="text-sm text-knox-600 hover:underline"
