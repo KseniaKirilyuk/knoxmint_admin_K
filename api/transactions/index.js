@@ -89,7 +89,8 @@ export default async function handler(req, res) {
       }
       // 'all' shows everything
 
-      sql += ` ORDER BY st.sale_date DESC, st.transaction_id DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+      // Sort by date, then order_number (groups refund with original), then is_refund (original first)
+      sql += ` ORDER BY st.sale_date DESC, st.order_number, COALESCE(st.is_refund, false) ASC, st.transaction_id DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
       params.push(parseInt(limit), parseInt(offset));
 
       const result = await query(sql, params);
