@@ -85,12 +85,18 @@ export default async function handler(req, res) {
       if (refundStatus === 'active') {
         sql += ` AND COALESCE(st.is_refunded, false) = false AND COALESCE(st.is_refund, false) = false`;
       } else if (refundStatus === 'refunded') {
-        sql += ` AND st.is_refunded = true`;
+        // Show both refunded sales AND their refund rows together
+        sql += ` AND (st.is_refunded = true OR st.is_refund = true)`;
       }
       // 'all' shows everything
 
-      // Sort by date, then order_number (groups refund with original), then is_refund (original first)
-      sql += ` ORDER BY st.sale_date DESC, st.order_number, COALESCE(st.is_refund, false) ASC, st.transaction_id DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+      // For 'all' or 'refunded': group by order_number to keep refunds with originals
+      // Order: order_number groups together, then original sale (is_refund=false) before refund row (is_refund=true)
+      if (refundStatus === 'all' || refundStatus === 'refunded') {
+        sql += ` ORDER BY st.order_number DESC, COALESCE(st.is_refund, false) ASC, st.sale_date DESC, st.transaction_id DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+      } else {
+        sql += ` ORDER BY st.sale_date DESC, st.transaction_id DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+      }
       params.push(parseInt(limit), parseInt(offset));
 
       const result = await query(sql, params);
@@ -131,7 +137,8 @@ export default async function handler(req, res) {
       if (refundStatus === 'active') {
         countSql += ` AND COALESCE(is_refunded, false) = false AND COALESCE(is_refund, false) = false`;
       } else if (refundStatus === 'refunded') {
-        countSql += ` AND is_refunded = true`;
+        // Show both refunded sales AND their refund rows together
+        countSql += ` AND (is_refunded = true OR is_refund = true)`;
       }
       
       const countResult = await query(countSql, countParams);

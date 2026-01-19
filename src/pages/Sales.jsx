@@ -630,15 +630,22 @@ export default function Sales() {
                   // Styling for refunded rows - greyed out
                   const refundedClass = isRefunded ? 'text-slate-400' : ''
                   
+                  // Don't allow expand for refund rows
+                  const canExpand = !isRefund
+                  
                   return (
                     <React.Fragment key={tx.transaction_id}>
                       {/* Main Row */}
                       <tr 
-                        className={`hover:bg-slate-50 cursor-pointer ${isRefund ? 'bg-red-50' : isRefunded ? 'bg-slate-100' : ''} ${isExpanded ? 'bg-knox-50/50' : ''}`}
-                        onClick={() => toggleRow(tx.transaction_id)}
+                        className={`${canExpand ? 'hover:bg-slate-50 cursor-pointer' : ''} ${isRefund ? 'bg-red-50' : isRefunded ? 'bg-slate-100' : ''} ${isExpanded && canExpand ? 'bg-knox-50/50' : ''}`}
+                        onClick={() => canExpand && toggleRow(tx.transaction_id)}
                       >
                         <td className="table-cell">
-                          <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                          {canExpand ? (
+                            <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                          ) : (
+                            <span className="w-4 h-4 block"></span>
+                          )}
                         </td>
                         <td className="table-cell font-mono text-xs">
                           <span className={refundedClass}>{tx.order_number || tx.listing_id || '-'}</span>
@@ -700,8 +707,8 @@ export default function Sales() {
                         </td>
                       </tr>
                       
-                      {/* Expanded Detail Row */}
-                      {isExpanded && (
+                      {/* Expanded Detail Row - only for non-refund rows */}
+                      {isExpanded && canExpand && (
                         <tr className="bg-slate-50 border-b">
                           <td colSpan={13} className="px-4 py-3">
                             {/* Original Title */}
