@@ -209,10 +209,20 @@ export default async function handler(req, res) {
 
     for (const tx of transactions) {
       try {
-        // Handle refund transactions - just mark original sale as refunded, no new transaction
+        // Handle refund transactions - create separate refund row with negative values
         if (tx.isRefund || tx.type === 'refund') {
           // Skip if no order number - can't find original
           if (!tx.orderNumber) {
+            skipped++;
+            continue;
+          }
+          
+          // Check if refund already exists for this order
+          const existingRefund = await query(
+            'SELECT transaction_id FROM sales_transactions WHERE order_number = $1 AND is_refund = true',
+            [tx.orderNumber]
+          );
+          if (existingRefund.rows.length > 0) {
             skipped++;
             continue;
           }
@@ -224,24 +234,43 @@ export default async function handler(req, res) {
              LEFT JOIN batches b ON st.batch_id = b.batch_id
              WHERE st.order_number = $1 
                AND (st.is_refund IS NULL OR st.is_refund = false)
-               AND (st.is_refunded IS NULL OR st.is_refunded = false)
              LIMIT 1`,
             [tx.orderNumber]
           );
           
-          // No original found or already refunded - skip
-          if (originalResult.rows.length === 0) {
-            skipped++;
-            continue;
+          // Get values from original sale (or use zeros if not found)
+          let originalSale = null;
+          let coinTypeId = null;
+          let batchId = null;
+          let salePrice = 0;
+          let ebayFee = 0;
+          let advertisingFee = 0;
+          let shippingCost = 0;
+          let totalPayout = 0;
+          let coinCost = 0;
+          let gradingCost = 0;
+          let profit = 0;
+          let profitShare = 0;
+          let memberPayout = 0;
+          
+          if (originalResult.rows.length > 0) {
+            originalSale = originalResult.rows[0];
+            coinTypeId = originalSale.coin_type_id;
+            batchId = originalSale.batch_id;
+            salePrice = parseFloat(originalSale.sale_price) || 0;
+            ebayFee = parseFloat(originalSale.ebay_fee) || 0;
+            advertisingFee = parseFloat(originalSale.advertising_fee) || 0;
+            shippingCost = parseFloat(originalSale.shipping_cost) || 0;
+            totalPayout = parseFloat(originalSale.total_payout) || 0;
+            coinCost = parseFloat(originalSale.coin_cost) || 0;
+            gradingCost = parseFloat(originalSale.grading_cost) || 0;
+            profit = parseFloat(originalSale.profit) || 0;
+            profitShare = parseFloat(originalSale.profit_share) || 0;
+            memberPayout = parseFloat(originalSale.payout) || 0;
           }
           
-          const originalSale = originalResult.rows[0];
-          const coinTypeId = originalSale.coin_type_id;
-          const batchId = originalSale.batch_id;
-          const originalPayout = parseFloat(originalSale.payout) || 0;
-          
           // Determine alert type
-          let alertType = 'unmapped';
+          let alertType = originalSale ? (batchId ? 'unpaid_batch' : 'unmapped') : 'orphan';
           let batchWasPaid = false;
           let suggestion = null;
           
@@ -267,25 +296,59 @@ export default async function handler(req, res) {
             suggestion = 'Coin returned to batch inventory for resale';
           }
           
-          // Mark original sale as refunded (keeps history but excluded from calculations)
-          await query(
-            'UPDATE sales_transactions SET is_refunded = true WHERE transaction_id = $1',
-            [originalSale.transaction_id]
-          );
+          // Mark original sale as refunded
+          if (originalSale) {
+            await query(
+              'UPDATE sales_transactions SET is_refunded = true WHERE transaction_id = $1',
+              [originalSale.transaction_id]
+            );
+          }
+          
+          // Insert SEPARATE refund transaction with NEGATIVE values
+          const refundResult = await query(`
+            INSERT INTO sales_transactions (
+              order_number, item_title, sale_date, 
+              sale_price, ebay_fee, advertising_fee, shipping_cost, total_payout,
+              coin_cost, grading_cost, profit, profit_share, payout,
+              coin_type_id, batch_id, quantity_sold,
+              is_refund, imported_from
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, true, 'ebay_upload')
+            RETURNING transaction_id
+          `, [
+            tx.orderNumber,
+            tx.itemTitle || (originalSale?.item_title ? 'Refund: ' + originalSale.item_title : 'Refund'),
+            tx.saleDate || new Date().toISOString().split('T')[0],
+            -salePrice,           // Negative sale price
+            -ebayFee,             // Negative fee (returned)
+            -advertisingFee,      // Negative fee (returned)
+            -shippingCost,        // Negative shipping (returned)
+            -totalPayout,         // Negative payout
+            -coinCost,            // Negative cost
+            -gradingCost,         // Negative grading cost
+            -profit,              // Negative profit
+            -profitShare,         // Negative profit share
+            -memberPayout,        // Negative member payout
+            coinTypeId,
+            batchId,
+            originalSale?.quantity_sold || 1
+          ]);
+          
+          const refundTransactionId = refundResult.rows[0].transaction_id;
           
           // Create refund alert for admin visibility
           const alertResult = await query(`
             INSERT INTO refund_alerts (
-              original_transaction_id, batch_id, coin_type_id,
+              refund_transaction_id, original_transaction_id, batch_id, coin_type_id,
               order_number, refund_amount, alert_type, batch_was_paid, suggestion
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING alert_id
           `, [
-            originalSale.transaction_id,
+            refundTransactionId,
+            originalSale?.transaction_id || null,
             batchId,
             coinTypeId,
             tx.orderNumber,
-            0, // No negative amount - refund = $0
+            -memberPayout,  // The amount being refunded
             alertType,
             batchWasPaid,
             suggestion
@@ -307,7 +370,7 @@ export default async function handler(req, res) {
               const totalContributed = parseInt(contrib.total_contributed) || 1;
               const sharePct = (parseInt(contrib.quantity) / totalContributed) * 100;
               // Amount owed back (negative = they owe this)
-              const owedAmount = -Math.abs(originalPayout * (contrib.quantity / totalContributed));
+              const owedAmount = -Math.abs(memberPayout * (contrib.quantity / totalContributed));
               
               await query(`
                 INSERT INTO member_adjustments (
