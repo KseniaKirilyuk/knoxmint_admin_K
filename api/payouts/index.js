@@ -18,7 +18,7 @@ export default async function handler(req, res) {
       const { action, userId, batchId } = req.query;
 
       // Get all members with balances
-      if (action === 'members') {
+      if (action === 'memberTotals') {
         const result = await query(`
           SELECT 
             u.user_id,
