@@ -616,7 +616,10 @@ export default function Sales() {
                   const ebayFee = parseFloat(tx.ebay_fee) || 0
                   const advertisingFee = parseFloat(tx.advertising_fee) || 0
                   const shippingCost = parseFloat(tx.shipping_cost) || 0
-                  const ebayPayout = salePrice - ebayFee - advertisingFee - shippingCost
+                  // For refunds: fees are returned (added back), for regular sales: fees are deducted
+                  const ebayPayout = isRefund 
+                    ? salePrice + ebayFee + advertisingFee + shippingCost
+                    : salePrice - ebayFee - advertisingFee - shippingCost
                   
                   const unitCoinCost = parseFloat(tx.unit_coin_cost) || 0
                   const unitGradingCost = parseFloat(tx.unit_grading_cost) || 0
@@ -670,9 +673,9 @@ export default function Sales() {
                           {tx.sale_date?.split('T')[0]}
                         </td>
                         <td className={`table-cell text-right ${refundedClass}`}>{formatCurrency(tx.sale_price)}</td>
-                        <td className={`table-cell text-right ${isRefunded ? 'text-slate-400' : 'text-red-600'}`}>{formatCurrency(-Math.abs(tx.ebay_fee))}</td>
-                        <td className={`table-cell text-right ${isRefunded ? 'text-slate-400' : 'text-red-600'}`}>{tx.advertising_fee > 0 ? formatCurrency(-tx.advertising_fee) : '-'}</td>
-                        <td className={`table-cell text-right ${isRefunded ? 'text-slate-400' : 'text-amber-600'}`}>{tx.shipping_cost > 0 ? formatCurrency(-tx.shipping_cost) : '-'}</td>
+                        <td className={`table-cell text-right ${isRefunded ? 'text-slate-400' : isRefund ? 'text-emerald-600' : 'text-red-600'}`}>{formatCurrency(isRefund ? Math.abs(tx.ebay_fee) : -Math.abs(tx.ebay_fee))}</td>
+                        <td className={`table-cell text-right ${isRefunded ? 'text-slate-400' : isRefund ? 'text-emerald-600' : 'text-red-600'}`}>{tx.advertising_fee > 0 ? formatCurrency(isRefund ? Math.abs(tx.advertising_fee) : -Math.abs(tx.advertising_fee)) : '-'}</td>
+                        <td className={`table-cell text-right ${isRefunded ? 'text-slate-400' : isRefund ? 'text-emerald-600' : 'text-amber-600'}`}>{tx.shipping_cost > 0 ? formatCurrency(isRefund ? Math.abs(tx.shipping_cost) : -Math.abs(tx.shipping_cost)) : '-'}</td>
                         <td className={`table-cell text-right font-medium ${refundedClass}`}>{formatCurrency(ebayPayout)}</td>
                         <td className="table-cell">
                           {tx.batch_name ? (
