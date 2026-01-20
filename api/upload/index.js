@@ -287,10 +287,11 @@ export default async function handler(req, res) {
             alertType = batchWasPaid ? 'paid_batch' : 'unpaid_batch';
             
             // Decrease batch_coins.total_sold - coin goes back to inventory
+            const refundQty = originalSale?.quantity_sold || 1;
             await query(
-              `UPDATE batch_coins SET total_sold = GREATEST(0, total_sold - 1) 
-               WHERE batch_id = $1 AND coin_type_id = $2`,
-              [batchId, coinTypeId]
+              `UPDATE batch_coins SET total_sold = GREATEST(0, total_sold - $1) 
+               WHERE batch_id = $2 AND coin_type_id = $3`,
+              [refundQty, batchId, coinTypeId]
             );
             
             suggestion = 'Coin returned to batch inventory for resale';
@@ -494,7 +495,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // Update batch_coins sold counts
+    // Update batch_coins sold counts (exclude refund rows AND refunded sales)
     await query(`
       UPDATE batch_coins bc
       SET total_sold = (
@@ -503,6 +504,7 @@ export default async function handler(req, res) {
         WHERE st.batch_id = bc.batch_id 
           AND st.coin_type_id = bc.coin_type_id
           AND COALESCE(st.is_refund, false) = false
+          AND COALESCE(st.is_refunded, false) = false
       )
     `);
 
