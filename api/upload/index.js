@@ -206,6 +206,10 @@ export default async function handler(req, res) {
     let imported = 0;
     let skipped = 0;
     const errors = [];
+    
+    // Track assigned quantities during this import session to prevent over-assignment
+    // Key: `${batchId}-${coinTypeId}`, Value: quantity assigned so far
+    const assignedDuringImport = {};
 
     for (const tx of transactions) {
       try {
@@ -275,8 +279,8 @@ export default async function handler(req, res) {
           let suggestion = null;
           
           if (batchId) {
-            // Check if the original sale was already paid out to members
-            // This is the correct check - not whether the user received any payout ever
+            // Check if this specific sale was already paid out to members
+            // Only create recovery adjustments if the original sale had is_paid_out = true
             batchWasPaid = originalSale?.is_paid_out === true;
             alertType = batchWasPaid ? 'paid_batch' : 'unpaid_batch';
             
@@ -288,9 +292,7 @@ export default async function handler(req, res) {
               [refundQty, batchId, coinTypeId]
             );
             
-            suggestion = batchWasPaid 
-              ? 'Sale was already paid out - recovery needed from members'
-              : 'Coin returned to batch inventory for resale (no payout was made)';
+            suggestion = 'Coin returned to batch inventory for resale';
           }
           
           // Mark original sale as refunded
@@ -315,10 +317,10 @@ export default async function handler(req, res) {
             tx.orderNumber,
             tx.itemTitle || (originalSale?.item_title ? 'Refund: ' + originalSale.item_title : 'Refund'),
             tx.saleDate || new Date().toISOString().split('T')[0],
-            -salePrice,           // Negative sale price
-            -ebayFee,             // Negative fee (returned)
-            -advertisingFee,      // Negative fee (returned)
-            -shippingCost,        // Negative shipping (returned)
+            -salePrice,           // Negative sale price (money returned to buyer)
+            ebayFee,              // Positive fee (fee returned to seller)
+            advertisingFee,       // Positive fee (fee returned to seller)
+            shippingCost,         // Positive shipping (shipping cost returned)
             -totalPayout,         // Negative payout
             -coinCost,            // Negative cost
             -gradingCost,         // Negative grading cost
@@ -332,30 +334,29 @@ export default async function handler(req, res) {
           
           const refundTransactionId = refundResult.rows[0].transaction_id;
           
-          // Only create refund alert if batch was actually paid out
-          // For unpaid batches, the negative refund row automatically offsets the sale - no alert needed
-          if (batchWasPaid && batchId && coinTypeId) {
-            const alertResult = await query(`
-              INSERT INTO refund_alerts (
-                refund_transaction_id, original_transaction_id, batch_id, coin_type_id,
-                order_number, refund_amount, alert_type, batch_was_paid, suggestion
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-              RETURNING alert_id
-            `, [
-              refundTransactionId,
-              originalSale?.transaction_id || null,
-              batchId,
-              coinTypeId,
-              tx.orderNumber,
-              -memberPayout,  // The amount being refunded
-              'paid_batch',
-              true,
-              'Members were already paid - recovery needed'
-            ]);
-            
-            const alertId = alertResult.rows[0].alert_id;
-            
-            // Create member adjustments (they need to return their payout)
+          // Create refund alert for admin visibility
+          const alertResult = await query(`
+            INSERT INTO refund_alerts (
+              refund_transaction_id, original_transaction_id, batch_id, coin_type_id,
+              order_number, refund_amount, alert_type, batch_was_paid, suggestion
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            RETURNING alert_id
+          `, [
+            refundTransactionId,
+            originalSale?.transaction_id || null,
+            batchId,
+            coinTypeId,
+            tx.orderNumber,
+            -memberPayout,  // The amount being refunded
+            alertType,
+            batchWasPaid,
+            suggestion
+          ]);
+          
+          const alertId = alertResult.rows[0].alert_id;
+          
+          // For paid_batch: create member adjustments (they need to return their payout)
+          if (alertType === 'paid_batch' && batchId && coinTypeId) {
             const contributors = await query(`
               SELECT uc.user_id, uc.quantity,
                      (SELECT SUM(quantity) FROM user_contributions 
@@ -400,27 +401,38 @@ export default async function handler(req, res) {
         // Find coin type by exact title match
         const coinType = titleToCoinType[tx.itemTitle];
         const coinTypeId = coinType?.coin_type_id || null;
+        const quantity = parseInt(tx.quantity) || 1;
         
         // Get cost_per_coin and grading_cost_per_coin from batch_coins (use oldest batch with available inventory - FIFO)
         let coinCost = 0;
         let gradingCost = 0;
         let batchId = null;
         if (coinTypeId) {
-          const batchCoin = await query(`
+          // Get all batches with this coin type that have inventory, ordered by FIFO
+          const batchCoins = await query(`
             SELECT bc.batch_id, bc.cost_per_coin, bc.grading_cost_per_coin, bc.total_contributed, bc.total_sold
             FROM batch_coins bc
             JOIN batches b ON bc.batch_id = b.batch_id
             WHERE bc.coin_type_id = $1 
               AND bc.cost_per_coin IS NOT NULL
-              AND bc.total_sold < bc.total_contributed
             ORDER BY b.ship_date ASC NULLS LAST, b.created_at ASC
-            LIMIT 1
           `, [coinTypeId]);
           
-          if (batchCoin.rows.length > 0) {
-            coinCost = parseFloat(batchCoin.rows[0].cost_per_coin) || 0;
-            gradingCost = parseFloat(batchCoin.rows[0].grading_cost_per_coin) || 0;
-            batchId = batchCoin.rows[0].batch_id;
+          // Find first batch with available inventory (accounting for this import session)
+          for (const bc of batchCoins.rows) {
+            const key = `${bc.batch_id}-${coinTypeId}`;
+            const alreadyAssigned = assignedDuringImport[key] || 0;
+            const totalSoldIncludingImport = parseInt(bc.total_sold) + alreadyAssigned;
+            const available = parseInt(bc.total_contributed) - totalSoldIncludingImport;
+            
+            if (available >= quantity) {
+              coinCost = parseFloat(bc.cost_per_coin) || 0;
+              gradingCost = parseFloat(bc.grading_cost_per_coin) || 0;
+              batchId = bc.batch_id;
+              // Track this assignment
+              assignedDuringImport[key] = alreadyAssigned + quantity;
+              break;
+            }
           }
         }
 
@@ -429,7 +441,6 @@ export default async function handler(req, res) {
         const ebayFee = Math.abs(parseFloat(tx.ebayFee) || 0);
         const advertisingFee = Math.abs(parseFloat(tx.advertisingFee) || 0);
         const shippingCost = Math.abs(parseFloat(tx.shippingCost) || 0);
-        const quantity = parseInt(tx.quantity) || 1;
         
         // totalPayout from frontend already has shipping subtracted
         const totalPayout = parseFloat(tx.totalPayout) || (salePrice - ebayFee - advertisingFee - shippingCost);
