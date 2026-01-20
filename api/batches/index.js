@@ -63,10 +63,18 @@ export default async function handler(req, res) {
           return res.status(404).json({ error: 'Batch not found' });
         }
 
+        // Get coins with refund counts
         const coinsResult = await query(`
-          SELECT bc.*, ct.name as coin_type_name, ct.short_code, ct.catalog_id, ct.is_ungraded
+          SELECT bc.*, ct.name as coin_type_name, ct.short_code, ct.catalog_id, ct.is_ungraded,
+                 COALESCE(refunds.refund_count, 0) as refund_count
           FROM batch_coins bc
           JOIN coin_types ct ON bc.coin_type_id = ct.coin_type_id
+          LEFT JOIN (
+            SELECT coin_type_id, batch_id, COUNT(*) as refund_count
+            FROM sales_transactions
+            WHERE is_refund = true
+            GROUP BY coin_type_id, batch_id
+          ) refunds ON bc.coin_type_id = refunds.coin_type_id AND bc.batch_id = refunds.batch_id
           WHERE bc.batch_id = $1
           ORDER BY ct.catalog_id, ct.is_ungraded, ct.name
         `, [batchId]);
@@ -80,10 +88,27 @@ export default async function handler(req, res) {
           ORDER BY ct.catalog_id, ct.is_ungraded, u.full_name
         `, [batchId]);
 
+        // Get pending member adjustments for this batch (money owed back)
+        const adjustmentsResult = await query(`
+          SELECT ma.*, u.username, u.full_name, ct.name as coin_type_name,
+                 ra.order_number, ra.alert_type
+          FROM member_adjustments ma
+          JOIN users u ON ma.user_id = u.user_id
+          LEFT JOIN coin_types ct ON ma.coin_type_id = ct.coin_type_id
+          LEFT JOIN refund_alerts ra ON ma.alert_id = ra.alert_id
+          WHERE ma.batch_id = $1 AND ma.status = 'pending'
+          ORDER BY u.full_name, ct.name
+        `, [batchId]);
+
+        // Calculate total pending recovery
+        const totalPendingRecovery = adjustmentsResult.rows.reduce((sum, adj) => sum + Math.abs(parseFloat(adj.amount) || 0), 0);
+
         return res.json({
           batch: batchResult.rows[0],
           coins: coinsResult.rows,
-          contributions: contribResult.rows
+          contributions: contribResult.rows,
+          pendingAdjustments: adjustmentsResult.rows,
+          totalPendingRecovery
         });
       }
 
@@ -976,8 +1001,49 @@ export default async function handler(req, res) {
     if (req.method === 'PUT') {
       if (user.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
 
-      const { batchId } = req.query;
+      const { batchId, action } = req.query;
       const { batchName, shipDate, grader, status, notes, coinPrices, contributionId, quantity } = req.body;
+
+      // Update member adjustment amount or status
+      if (action === 'updateAdjustment') {
+        const { adjustmentId, amount, adjustmentStatus } = req.body;
+        
+        if (!adjustmentId) {
+          return res.status(400).json({ error: 'adjustmentId required' });
+        }
+        
+        const updates = [];
+        const params = [];
+        let paramIndex = 1;
+        
+        if (amount !== undefined) {
+          updates.push(`amount = $${paramIndex}`);
+          params.push(amount);
+          paramIndex++;
+        }
+        
+        if (adjustmentStatus) {
+          updates.push(`status = $${paramIndex}`);
+          params.push(adjustmentStatus);
+          paramIndex++;
+          
+          if (adjustmentStatus === 'waived' || adjustmentStatus === 'applied') {
+            updates.push(`applied_at = CURRENT_TIMESTAMP`);
+          }
+        }
+        
+        if (updates.length === 0) {
+          return res.status(400).json({ error: 'No updates provided' });
+        }
+        
+        params.push(adjustmentId);
+        await query(
+          `UPDATE member_adjustments SET ${updates.join(', ')} WHERE adjustment_id = $${paramIndex}`,
+          params
+        );
+        
+        return res.json({ success: true });
+      }
 
       // Update contribution (check this first since it doesn't need batchId in query)
       if (contributionId !== undefined) {

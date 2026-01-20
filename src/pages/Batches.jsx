@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, Upload as UploadIcon, Calendar, Package, Users, X, Edit2, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, CheckCircle, AlertCircle, DollarSign, Check, Scissors, RefreshCw } from 'lucide-react'
+import { Plus, Upload as UploadIcon, Calendar, Package, Users, X, Edit2, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, CheckCircle, AlertCircle, AlertTriangle, DollarSign, Check, Scissors, RefreshCw } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import api from '../lib/api'
 
@@ -1045,7 +1045,15 @@ export default function Batches() {
                                   <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">UG</span>
                                 )}
                               </div>
-                              <p className="text-xs text-slate-500">{coin.total_contributed} coins</p>
+                              <div className="text-xs text-slate-500 space-y-0.5 mt-1">
+                                <p>{coin.total_contributed} contributed • {coin.total_sold || 0} sold</p>
+                                {(coin.refund_count > 0) && (
+                                  <p className="text-red-500">{coin.refund_count} refunded</p>
+                                )}
+                                {(coin.total_contributed - (coin.total_sold || 0)) > 0 && (
+                                  <p className="text-amber-600">{coin.total_contributed - (coin.total_sold || 0)} remaining to sell</p>
+                                )}
+                              </div>
                               <div className="mt-1 text-sm">
                                 {hasValidPrice ? (
                                   <div>
@@ -1111,6 +1119,106 @@ export default function Batches() {
                   ) : (
                     <div className="px-6 py-8 text-center text-slate-500">
                       No contributions yet. Upload a spreadsheet to add contributions.
+                    </div>
+                  )}
+
+                  {/* Pending Refund Adjustments - Money owed by members */}
+                  {batchDetails.pendingAdjustments?.length > 0 && (
+                    <div className="px-6 py-4 border-t bg-red-50">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle className="w-5 h-5 text-red-500" />
+                          <h4 className="font-medium text-red-700">Pending Recovery from Refunds</h4>
+                        </div>
+                        <span className="text-lg font-bold text-red-600">
+                          ${batchDetails.totalPendingRecovery?.toFixed(2) || '0.00'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-red-600 mb-3">
+                        These members were paid for sales that were later refunded. They owe this money back.
+                      </p>
+                      <div className="space-y-2">
+                        {/* Group adjustments by member */}
+                        {Object.entries(
+                          batchDetails.pendingAdjustments.reduce((acc, adj) => {
+                            const key = adj.user_id;
+                            if (!acc[key]) {
+                              acc[key] = {
+                                username: adj.full_name || adj.username,
+                                userId: adj.user_id,
+                                items: [],
+                                total: 0
+                              };
+                            }
+                            acc[key].items.push(adj);
+                            acc[key].total += Math.abs(parseFloat(adj.amount) || 0);
+                            return acc;
+                          }, {})
+                        ).map(([userId, data]) => (
+                          <div key={userId} className="bg-white rounded-lg border border-red-200 overflow-hidden">
+                            <div className="px-4 py-2 bg-red-100 flex items-center justify-between">
+                              <span className="font-medium text-red-800">{data.username}</span>
+                              <span className="font-bold text-red-600">${data.total.toFixed(2)} owed</span>
+                            </div>
+                            <div className="divide-y divide-red-100">
+                              {data.items.map(adj => (
+                                <div key={adj.adjustment_id} className="px-4 py-2 flex items-center justify-between text-sm">
+                                  <div>
+                                    <span className="text-slate-600">Order {adj.order_number}</span>
+                                    <span className="text-slate-400 mx-2">•</span>
+                                    <span className="text-slate-500">{adj.coin_type_name}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      className="w-24 px-2 py-1 text-right text-sm border rounded"
+                                      defaultValue={Math.abs(parseFloat(adj.amount)).toFixed(2)}
+                                      onBlur={(e) => {
+                                        const newAmount = -Math.abs(parseFloat(e.target.value) || 0);
+                                        if (newAmount !== parseFloat(adj.amount)) {
+                                          api.put('/batches?action=updateAdjustment', {
+                                            adjustmentId: adj.adjustment_id,
+                                            amount: newAmount
+                                          }).then(() => loadBatchDetails(batch.batch_id));
+                                        }
+                                      }}
+                                    />
+                                    <button
+                                      onClick={() => {
+                                        if (confirm('Mark this adjustment as waived? The member will not need to repay.')) {
+                                          api.put('/batches?action=updateAdjustment', {
+                                            adjustmentId: adj.adjustment_id,
+                                            adjustmentStatus: 'waived'
+                                          }).then(() => loadBatchDetails(batch.batch_id));
+                                        }
+                                      }}
+                                      className="px-2 py-1 text-xs bg-slate-100 hover:bg-slate-200 rounded"
+                                      title="Waive this adjustment"
+                                    >
+                                      Waive
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        if (confirm('Mark as paid/recovered?')) {
+                                          api.put('/batches?action=updateAdjustment', {
+                                            adjustmentId: adj.adjustment_id,
+                                            adjustmentStatus: 'applied'
+                                          }).then(() => loadBatchDetails(batch.batch_id));
+                                        }
+                                      }}
+                                      className="px-2 py-1 text-xs bg-emerald-100 text-emerald-700 hover:bg-emerald-200 rounded"
+                                      title="Mark as recovered"
+                                    >
+                                      Paid
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1275,12 +1383,17 @@ export default function Batches() {
               {batchDetails.coins?.map(coin => {
                 const key = String(coin.coin_type_id)
                 const isUngraded = coin.is_ungraded
+                const remaining = coin.total_contributed - (coin.total_sold || 0)
                 return (
                   <div key={coin.id} className="border rounded-lg p-3">
                     <div className="flex items-center justify-between mb-2">
                       <div>
                         <p className="font-medium">{coin.coin_type_name}</p>
-                        <p className="text-xs text-slate-500">{coin.total_contributed} coins</p>
+                        <p className="text-xs text-slate-500">
+                          {coin.total_contributed} contributed • {coin.total_sold || 0} sold
+                          {coin.refund_count > 0 && <span className="text-red-500"> • {coin.refund_count} refunded</span>}
+                          {remaining > 0 && <span className="text-amber-600"> • {remaining} remaining</span>}
+                        </p>
                       </div>
                       {isUngraded && (
                         <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded">Ungraded</span>
