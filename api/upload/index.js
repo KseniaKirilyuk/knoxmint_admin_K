@@ -275,15 +275,9 @@ export default async function handler(req, res) {
           let suggestion = null;
           
           if (batchId) {
-            // Check if any member who contributed to this batch was paid
-            const batchPayouts = await query(
-              `SELECT COUNT(*) as count FROM payouts p
-               JOIN user_contributions uc ON p.user_id = uc.user_id
-               WHERE uc.batch_id = $1 AND p.status = 'Paid'`,
-              [batchId]
-            );
-            
-            batchWasPaid = parseInt(batchPayouts.rows[0]?.count) > 0;
+            // Check if the original sale was already paid out to members
+            // This is the correct check - not whether the user received any payout ever
+            batchWasPaid = originalSale?.is_paid_out === true;
             alertType = batchWasPaid ? 'paid_batch' : 'unpaid_batch';
             
             // Decrease batch_coins.total_sold - coin goes back to inventory
@@ -294,7 +288,9 @@ export default async function handler(req, res) {
               [refundQty, batchId, coinTypeId]
             );
             
-            suggestion = 'Coin returned to batch inventory for resale';
+            suggestion = batchWasPaid 
+              ? 'Sale was already paid out - recovery needed from members'
+              : 'Coin returned to batch inventory for resale (no payout was made)';
           }
           
           // Mark original sale as refunded
@@ -336,29 +332,30 @@ export default async function handler(req, res) {
           
           const refundTransactionId = refundResult.rows[0].transaction_id;
           
-          // Create refund alert for admin visibility
-          const alertResult = await query(`
-            INSERT INTO refund_alerts (
-              refund_transaction_id, original_transaction_id, batch_id, coin_type_id,
-              order_number, refund_amount, alert_type, batch_was_paid, suggestion
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            RETURNING alert_id
-          `, [
-            refundTransactionId,
-            originalSale?.transaction_id || null,
-            batchId,
-            coinTypeId,
-            tx.orderNumber,
-            -memberPayout,  // The amount being refunded
-            alertType,
-            batchWasPaid,
-            suggestion
-          ]);
-          
-          const alertId = alertResult.rows[0].alert_id;
-          
-          // For paid_batch: create member adjustments (they need to return their payout)
-          if (alertType === 'paid_batch' && batchId && coinTypeId) {
+          // Only create refund alert if batch was actually paid out
+          // For unpaid batches, the negative refund row automatically offsets the sale - no alert needed
+          if (batchWasPaid && batchId && coinTypeId) {
+            const alertResult = await query(`
+              INSERT INTO refund_alerts (
+                refund_transaction_id, original_transaction_id, batch_id, coin_type_id,
+                order_number, refund_amount, alert_type, batch_was_paid, suggestion
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+              RETURNING alert_id
+            `, [
+              refundTransactionId,
+              originalSale?.transaction_id || null,
+              batchId,
+              coinTypeId,
+              tx.orderNumber,
+              -memberPayout,  // The amount being refunded
+              'paid_batch',
+              true,
+              'Members were already paid - recovery needed'
+            ]);
+            
+            const alertId = alertResult.rows[0].alert_id;
+            
+            // Create member adjustments (they need to return their payout)
             const contributors = await query(`
               SELECT uc.user_id, uc.quantity,
                      (SELECT SUM(quantity) FROM user_contributions 
