@@ -488,15 +488,6 @@ export default async function handler(req, res) {
           isRefunded
         ]);
 
-        // Update batch_coins sold count
-        if (batchId) {
-          await query(`
-            UPDATE batch_coins 
-            SET total_sold = total_sold + $1, updated_at = CURRENT_TIMESTAMP
-            WHERE batch_id = $2 AND coin_type_id = $3
-          `, [quantity, batchId, coinTypeId]);
-        }
-
         imported++;
       } catch (err) {
         errors.push(`Row ${tx.orderNumber || 'unknown'}: ${err.message}`);
