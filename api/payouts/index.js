@@ -34,7 +34,6 @@ export default async function handler(req, res) {
             GROUP BY user_id
           ) contrib ON u.user_id = contrib.user_id
           LEFT JOIN (
-            -- Calculate earnings from active sales only (exclude refunds and refunded)
             SELECT 
               uc.user_id,
               SUM(
@@ -82,7 +81,6 @@ export default async function handler(req, res) {
       }
 
       // Get batch totals for payout overview
-      // FIXED: Excludes both is_refund AND is_refunded sales
       if (action === 'batchTotals') {
         const result = await query(`
           SELECT 
@@ -108,7 +106,6 @@ export default async function handler(req, res) {
       }
 
       // Get breakdown for a specific batch
-      // FIXED: Uses SUM(st.quantity_sold) instead of bc.total_sold, excludes refunds
       if (action === 'batchBreakdown') {
         if (!batchId) return res.status(400).json({ error: 'Batch ID required' });
         
@@ -140,29 +137,24 @@ export default async function handler(req, res) {
       }
 
       // Get breakdown for a specific member
+      // Returns data for each batch/coin_type the member contributed to
       if (action === 'memberBreakdown' && userId) {
         const result = await query(`
-          WITH coin_totals AS (
-            SELECT 
-              batch_id,
-              coin_type_id,
-              SUM(quantity) as total_for_coin
+          WITH batch_totals AS (
+            SELECT batch_id, coin_type_id, SUM(quantity) as total_qty
             FROM user_contributions
             WHERE quantity > 0
             GROUP BY batch_id, coin_type_id
           ),
           user_contribs AS (
             SELECT 
-              uc.user_id,
               uc.batch_id,
               uc.coin_type_id,
               uc.quantity as user_contributed,
-              ct_totals.total_for_coin,
-              ROUND((uc.quantity::decimal / NULLIF(ct_totals.total_for_coin, 0) * 100)::numeric, 1) as share_pct,
-              ct.catalog_id
+              bt.total_qty as batch_pool,
+              ROUND((uc.quantity::decimal / NULLIF(bt.total_qty, 0) * 100)::numeric, 1) as share_pct
             FROM user_contributions uc
-            JOIN coin_totals ct_totals ON uc.batch_id = ct_totals.batch_id AND uc.coin_type_id = ct_totals.coin_type_id
-            JOIN coin_types ct ON uc.coin_type_id = ct.coin_type_id
+            JOIN batch_totals bt ON uc.batch_id = bt.batch_id AND uc.coin_type_id = bt.coin_type_id
             WHERE uc.user_id = $1 AND uc.quantity > 0
           ),
           coin_sales AS (
@@ -170,25 +162,38 @@ export default async function handler(req, res) {
               uc.batch_id,
               uc.coin_type_id,
               uc.user_contributed,
-              uc.total_for_coin,
+              uc.batch_pool,
               uc.share_pct,
-              uc.catalog_id,
-              COALESCE(SUM(st.quantity_sold), 0) as total_sold,
-              COALESCE(SUM(st.payout), 0) as total_payout_all,
-              COALESCE(SUM(st.payout) * (uc.user_contributed::decimal / NULLIF(uc.total_for_coin, 0)), 0) as user_payout,
-              COALESCE(SUM(st.profit), 0) as total_profit
+              COALESCE(SUM(st.quantity_sold), 0) as sold,
+              COALESCE(SUM(st.total_payout), 0) as ebay_payout,
+              COALESCE(SUM(st.profit), 0) as profit,
+              COALESCE(SUM(st.profit_share), 0) as admin_share,
+              COALESCE(SUM(st.profit), 0) - COALESCE(SUM(st.profit_share), 0) as member_profit,
+              COALESCE(SUM(st.payout), 0) as total_batch_member_payout,
+              COALESCE(SUM(st.payout) * (uc.user_contributed::decimal / NULLIF(uc.batch_pool, 0)), 0) as member_payout
             FROM user_contribs uc
             LEFT JOIN sales_transactions st ON st.batch_id = uc.batch_id 
               AND st.coin_type_id = uc.coin_type_id
               AND COALESCE(st.is_refund, false) = false
               AND COALESCE(st.is_refunded, false) = false
-            GROUP BY uc.batch_id, uc.coin_type_id, uc.user_contributed, uc.total_for_coin, uc.share_pct, uc.catalog_id
+            GROUP BY uc.batch_id, uc.coin_type_id, uc.user_contributed, uc.batch_pool, uc.share_pct
           )
           SELECT 
-            cs.*,
+            cs.batch_id,
             b.batch_name,
+            b.ship_date,
+            cs.coin_type_id,
             ct.name as coin_type_name,
             ct.is_ungraded,
+            cs.batch_pool as pool,
+            cs.user_contributed,
+            cs.share_pct,
+            cs.sold,
+            cs.ebay_payout,
+            cs.profit,
+            cs.admin_share,
+            cs.member_profit,
+            cs.member_payout,
             bc.cost_per_coin,
             bc.grading_cost_per_coin
           FROM coin_sales cs
