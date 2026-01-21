@@ -42,9 +42,12 @@ export default async function handler(req, res) {
   if (!user) return res.status(401).json({ error: 'Authentication required' });
 
   try {
+    // Extract query params - available to all methods
+    const { batchId } = req.query;
+    const action = req.query.action || req.body?.action;
+    
     // GET requests
     if (req.method === 'GET') {
-      const { action, batchId } = req.query;
 
       // Get coin types
       if (action === 'coinTypes') {
@@ -191,8 +194,6 @@ export default async function handler(req, res) {
     // POST requests
     if (req.method === 'POST') {
       if (user.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
-
-      const action = req.query.action || req.body.action;
 
       // Create new batch
       if (action === 'create') {
@@ -1001,7 +1002,6 @@ export default async function handler(req, res) {
     if (req.method === 'PUT') {
       if (user.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
 
-      const { batchId, action } = req.query;
       const { batchName, shipDate, grader, status, notes, coinPrices, contributionId, quantity } = req.body;
 
       // Update member adjustment amount or status
