@@ -55,24 +55,41 @@ export default async function handler(req, res) {
         let reassigned = 0;
         let notFound = 0;
         
+        // Track assigned quantities during this reassignment to prevent over-assignment
+        const assignedDuringReassign = {};
+        
         for (const sale of unmappedSales.rows) {
-          // Find batch with this coin type that has cost set and available inventory
-          const batchResult = await query(`
-            SELECT bc.batch_id, bc.cost_per_coin, bc.grading_cost_per_coin
+          const quantity = parseInt(sale.quantity_sold) || 1;
+          
+          // Find all batches with this coin type that have cost set
+          const batchResults = await query(`
+            SELECT bc.batch_id, bc.cost_per_coin, bc.grading_cost_per_coin, bc.total_contributed, bc.total_sold
             FROM batch_coins bc
             JOIN batches b ON bc.batch_id = b.batch_id
             WHERE bc.coin_type_id = $1 
               AND bc.cost_per_coin IS NOT NULL
-              AND bc.total_sold < bc.total_contributed
             ORDER BY b.ship_date ASC NULLS LAST, b.created_at ASC
-            LIMIT 1
           `, [sale.coin_type_id]);
           
-          if (batchResult.rows.length > 0) {
-            const batch = batchResult.rows[0];
-            const coinCost = parseFloat(batch.cost_per_coin) || 0;
-            const gradingCost = parseFloat(batch.grading_cost_per_coin) || 0;
-            const quantity = parseInt(sale.quantity_sold) || 1;
+          // Find first batch with available inventory (accounting for this session)
+          let selectedBatch = null;
+          for (const bc of batchResults.rows) {
+            const key = `${bc.batch_id}-${sale.coin_type_id}`;
+            const alreadyAssigned = assignedDuringReassign[key] || 0;
+            const totalSoldIncludingReassign = parseInt(bc.total_sold) + alreadyAssigned;
+            const available = parseInt(bc.total_contributed) - totalSoldIncludingReassign;
+            
+            if (available >= quantity) {
+              selectedBatch = bc;
+              // Track this assignment
+              assignedDuringReassign[key] = alreadyAssigned + quantity;
+              break;
+            }
+          }
+          
+          if (selectedBatch) {
+            const coinCost = parseFloat(selectedBatch.cost_per_coin) || 0;
+            const gradingCost = parseFloat(selectedBatch.grading_cost_per_coin) || 0;
             
             // Get sale details to recalculate
             const saleDetails = await query(`
@@ -98,7 +115,7 @@ export default async function handler(req, res) {
                   profit_share = $5,
                   payout = $6
               WHERE transaction_id = $7
-            `, [batch.batch_id, totalCoinCost, totalGradingCost, profit, profitShare, payout, sale.transaction_id]);
+            `, [selectedBatch.batch_id, totalCoinCost, totalGradingCost, profit, profitShare, payout, sale.transaction_id]);
             
             reassigned++;
           } else {
@@ -426,7 +443,6 @@ export default async function handler(req, res) {
             const available = parseInt(bc.total_contributed) - totalSoldIncludingImport;
             
             if (available >= quantity) {
-console.log(`Batch ${bc.batch_id}, CoinType ${coinTypeId}: available=${available}, quantity=${quantity}, alreadyAssigned=${alreadyAssigned}`);
               coinCost = parseFloat(bc.cost_per_coin) || 0;
               gradingCost = parseFloat(bc.grading_cost_per_coin) || 0;
               batchId = bc.batch_id;
