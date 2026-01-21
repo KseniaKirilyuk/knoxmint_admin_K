@@ -320,6 +320,9 @@ export default async function handler(req, res) {
 
       let updated = 0;
       
+      // Track assigned quantities during this mapping operation
+      const assignedDuringMapping = {};
+      
       for (const [itemTitle, rawCoinTypeId] of Object.entries(mappings)) {
         if (!rawCoinTypeId) continue;
         
@@ -330,50 +333,77 @@ export default async function handler(req, res) {
           continue;
         }
         
-        // Get cost_per_coin and grading_cost_per_coin for this coin type from batch_coins
-        const batchCoin = await query(`
-          SELECT bc.batch_id, bc.cost_per_coin, bc.grading_cost_per_coin
+        // Get all unmapped sales with this title
+        const unmappedSales = await query(`
+          SELECT transaction_id, quantity_sold, total_payout, sale_price
+          FROM sales_transactions
+          WHERE item_title = $1
+            AND coin_type_id IS NULL
+            AND COALESCE(is_refund, false) = false
+        `, [itemTitle]);
+        
+        // Get all batches with this coin type (ordered by date for FIFO)
+        const batches = await query(`
+          SELECT bc.batch_id, bc.cost_per_coin, bc.grading_cost_per_coin, bc.total_contributed, bc.total_sold
           FROM batch_coins bc
           JOIN batches b ON bc.batch_id = b.batch_id
           WHERE bc.coin_type_id = $1 
             AND bc.cost_per_coin IS NOT NULL
           ORDER BY b.ship_date ASC NULLS LAST, b.created_at ASC
-          LIMIT 1
         `, [coinTypeId]);
         
-        // Get coin cost and grading cost separately
-        const coinCost = batchCoin.rows.length > 0 ? parseFloat(batchCoin.rows[0].cost_per_coin) || 0 : 0;
-        const gradingCost = batchCoin.rows.length > 0 ? parseFloat(batchCoin.rows[0].grading_cost_per_coin) || 0 : 0;
-        const totalCostPerCoin = coinCost + gradingCost;
-        const batchId = batchCoin.rows.length > 0 ? parseInt(batchCoin.rows[0].batch_id) : null;
-        
-        // Debug logging
-        console.log(`Mapping "${itemTitle}" -> coinTypeId=${coinTypeId}, batchId=${batchId}, coinCost=${coinCost}, gradingCost=${gradingCost}`);
-        
-        // Update all sales with this title
-        // Profit = Net - Grading cost - Coin cost
-        // Business share = max(33% × Profit, $8 per coin) - ALWAYS at least $8
-        // Member payout = Net - Grading cost - Business share
-        const updateResult = await query(`
-          UPDATE sales_transactions
-          SET 
-            coin_type_id = $1::integer,
-            batch_id = $2::integer,
-            coin_cost = $3::numeric * quantity_sold,
-            profit = total_payout - ($4::numeric * quantity_sold) - ($5::numeric * quantity_sold),
-            profit_share = GREATEST(0.33 * (total_payout - ($4::numeric * quantity_sold) - ($5::numeric * quantity_sold)), 8 * quantity_sold),
-            payout = total_payout - ($4::numeric * quantity_sold) - GREATEST(0.33 * (total_payout - ($4::numeric * quantity_sold) - ($5::numeric * quantity_sold)), 8 * quantity_sold),
-            profit_margin = CASE 
-              WHEN sale_price > 0 
-              THEN (total_payout - ($4::numeric * quantity_sold) - ($5::numeric * quantity_sold)) / sale_price
-              ELSE 0 
-            END
-          WHERE item_title = $6
-            AND coin_type_id IS NULL
-            AND COALESCE(is_refund, false) = false
-        `, [coinTypeId, batchId, totalCostPerCoin, gradingCost, coinCost, itemTitle]);
-        
-        updated += updateResult.rowCount;
+        // Process each sale individually
+        for (const sale of unmappedSales.rows) {
+          const quantity = parseInt(sale.quantity_sold) || 1;
+          
+          // Find first batch with available inventory
+          let selectedBatch = null;
+          for (const bc of batches.rows) {
+            const key = `${bc.batch_id}-${coinTypeId}`;
+            const alreadyAssigned = assignedDuringMapping[key] || 0;
+            const totalSoldIncludingMapping = parseInt(bc.total_sold) + alreadyAssigned;
+            const available = parseInt(bc.total_contributed) - totalSoldIncludingMapping;
+            
+            if (available >= quantity) {
+              selectedBatch = bc;
+              // Track this assignment
+              assignedDuringMapping[key] = alreadyAssigned + quantity;
+              break;
+            }
+          }
+          
+          // Get costs (0 if no batch available)
+          const coinCost = selectedBatch ? parseFloat(selectedBatch.cost_per_coin) || 0 : 0;
+          const gradingCost = selectedBatch ? parseFloat(selectedBatch.grading_cost_per_coin) || 0 : 0;
+          const batchId = selectedBatch ? selectedBatch.batch_id : null;
+          const totalCostPerCoin = coinCost + gradingCost;
+          
+          // Calculate payout values
+          const totalPayout = parseFloat(sale.total_payout) || 0;
+          const salePrice = parseFloat(sale.sale_price) || 0;
+          const totalCoinCost = totalCostPerCoin * quantity;
+          const totalGradingCost = gradingCost * quantity;
+          const profit = totalPayout - totalGradingCost - (coinCost * quantity);
+          const profitShare = Math.max(0.33 * profit, 8 * quantity);
+          const payout = totalPayout - totalGradingCost - profitShare;
+          const profitMargin = salePrice > 0 ? profit / salePrice : 0;
+          
+          // Update this sale
+          await query(`
+            UPDATE sales_transactions
+            SET 
+              coin_type_id = $1,
+              batch_id = $2,
+              coin_cost = $3,
+              profit = $4,
+              profit_share = $5,
+              payout = $6,
+              profit_margin = $7
+            WHERE transaction_id = $8
+          `, [coinTypeId, batchId, totalCoinCost, profit, profitShare, payout, profitMargin, sale.transaction_id]);
+          
+          updated++;
+        }
       }
 
       // Update batch_coins sold counts
