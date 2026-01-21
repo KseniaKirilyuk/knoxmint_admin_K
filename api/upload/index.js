@@ -426,6 +426,7 @@ export default async function handler(req, res) {
             const available = parseInt(bc.total_contributed) - totalSoldIncludingImport;
             
             if (available >= quantity) {
+console.log(`Batch ${bc.batch_id}, CoinType ${coinTypeId}: available=${available}, quantity=${quantity}, alreadyAssigned=${alreadyAssigned}`);
               coinCost = parseFloat(bc.cost_per_coin) || 0;
               gradingCost = parseFloat(bc.grading_cost_per_coin) || 0;
               batchId = bc.batch_id;
