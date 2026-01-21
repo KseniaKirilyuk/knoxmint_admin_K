@@ -306,11 +306,11 @@ export default function Upload() {
             action: 'map',
             coinTypeId: match.coin_type_id,
             matchedName: match.name
-          
-	} else {
-  		initialMappings[title] = {
-    		action: 'skip'
-  		}
+          }
+        } else {
+          initialMappings[title] = {
+            action: 'skip'
+          }
         }
       })
 
