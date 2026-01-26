@@ -21,7 +21,7 @@ export default function Settings() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [showUploadModal, setShowUploadModal] = useState(false)
   const [editingCoin, setEditingCoin] = useState(null)
-  const [coinForm, setCoinForm] = useState({ name: '', catalogId: '', description: '', createBoth: true, isUngraded: false })
+  const [coinForm, setCoinForm] = useState({ name: '', catalogId: '', description: '' })
   const [uploadData, setUploadData] = useState(null)
   const [uploadResults, setUploadResults] = useState(null)
   const [uploading, setUploading] = useState(false)
@@ -43,7 +43,8 @@ export default function Settings() {
     setLoadingCoins(true)
     try {
       const res = await api.get('/batches?action=coinTypes')
-      setCoinTypes(res.data)
+      // Filter out legacy "(Ungraded)" coin types
+      setCoinTypes(res.data.filter(ct => !ct.is_ungraded && !ct.name?.includes('(Ungraded)')))
     } catch (error) {
       console.error('Error fetching coin types:', error)
     } finally {
@@ -59,12 +60,10 @@ export default function Settings() {
         catalogId: coinForm.catalogId,
         name: coinForm.name || coinForm.catalogId,
         shortCode: coinForm.catalogId,
-        description: coinForm.description,
-        createBoth: coinForm.createBoth,
-        isUngraded: coinForm.isUngraded
+        description: coinForm.description
       })
       setShowAddModal(false)
-      setCoinForm({ name: '', catalogId: '', description: '', createBoth: true, isUngraded: false })
+      setCoinForm({ name: '', catalogId: '', description: '' })
       fetchCoinTypes()
     } catch (error) {
       alert(error.response?.data?.error || 'Error adding coin type')
@@ -76,9 +75,7 @@ export default function Settings() {
     setCoinForm({
       name: coin.name || '',
       catalogId: coin.catalog_id || coin.short_code || '',
-      description: coin.description || '',
-      createBoth: false,
-      isUngraded: coin.is_ungraded || false
+      description: coin.description || ''
     })
   }
 
@@ -91,11 +88,10 @@ export default function Settings() {
         name: coinForm.name,
         catalogId: coinForm.catalogId,
         shortCode: coinForm.catalogId, // Keep short_code in sync with catalog_id
-        description: coinForm.description,
-        isUngraded: coinForm.isUngraded
+        description: coinForm.description
       })
       setEditingCoin(null)
-      setCoinForm({ name: '', catalogId: '', description: '', createBoth: true, isUngraded: false })
+      setCoinForm({ name: '', catalogId: '', description: '' })
       fetchCoinTypes()
     } catch (error) {
       alert(error.response?.data?.error || 'Error updating coin type')
@@ -363,7 +359,6 @@ export default function Settings() {
                       <tr>
                         <th className="table-header">Name</th>
                         <th className="table-header">Catalog ID</th>
-                        <th className="table-header">Type</th>
                         <th className="table-header w-24"></th>
                       </tr>
                     </thead>
@@ -375,17 +370,6 @@ export default function Settings() {
                             <span className="px-2 py-0.5 bg-slate-100 rounded text-xs font-mono">
                               {coin.catalog_id || coin.short_code || '-'}
                             </span>
-                          </td>
-                          <td className="table-cell">
-                            {coin.is_ungraded ? (
-                              <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-xs">
-                                Ungraded
-                              </span>
-                            ) : (
-                              <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-xs">
-                                Graded
-                              </span>
-                            )}
                           </td>
                           <td className="table-cell">
                             <div className="flex items-center justify-end gap-1">
@@ -644,54 +628,12 @@ export default function Settings() {
                   onChange={(e) => setCoinForm({ ...coinForm, description: e.target.value })}
                 />
               </div>
-              <div className="bg-slate-50 rounded-lg p-4 space-y-3">
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={coinForm.createBoth}
-                    onChange={(e) => setCoinForm({ ...coinForm, createBoth: e.target.checked })}
-                    className="rounded border-slate-300 text-knox-600 focus:ring-knox-500"
-                  />
-                  <div>
-                    <p className="font-medium text-slate-900">Create both graded & ungraded variants</p>
-                    <p className="text-xs text-slate-500">Creates {coinForm.catalogId || 'CODE'} and {coinForm.catalogId || 'CODE'}-UNGRADED</p>
-                  </div>
-                </label>
-                
-                {!coinForm.createBoth && (
-                  <div className="pt-2 border-t border-slate-200">
-                    <p className="text-sm font-medium text-slate-700 mb-2">Coin Type:</p>
-                    <div className="flex gap-3">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="coinType"
-                          checked={!coinForm.isUngraded}
-                          onChange={() => setCoinForm({ ...coinForm, isUngraded: false })}
-                          className="text-knox-600 focus:ring-knox-500"
-                        />
-                        <span className="text-sm">Graded</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="coinType"
-                          checked={coinForm.isUngraded}
-                          onChange={() => setCoinForm({ ...coinForm, isUngraded: true })}
-                          className="text-knox-600 focus:ring-knox-500"
-                        />
-                        <span className="text-sm">Ungraded</span>
-                      </label>
-                    </div>
-                  </div>
-                )}
-              </div>
               <div className="flex gap-3 pt-4">
                 <button type="button" onClick={() => setShowAddModal(false)} className="btn btn-secondary flex-1">
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary flex-1">
-                  Add Coin{coinForm.createBoth ? 's' : ''}
+                  Add Coin
                 </button>
               </div>
             </form>
@@ -741,37 +683,6 @@ export default function Settings() {
                   value={coinForm.description}
                   onChange={(e) => setCoinForm({ ...coinForm, description: e.target.value })}
                 />
-              </div>
-              <div className="bg-slate-50 rounded-lg p-4">
-                <p className="text-sm font-medium text-slate-700 mb-2">Coin Type:</p>
-                <div className="flex gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="editCoinType"
-                      checked={!coinForm.isUngraded}
-                      onChange={() => setCoinForm({ ...coinForm, isUngraded: false })}
-                      className="text-knox-600 focus:ring-knox-500"
-                    />
-                    <span className="text-sm flex items-center gap-1">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                      Graded
-                    </span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="editCoinType"
-                      checked={coinForm.isUngraded}
-                      onChange={() => setCoinForm({ ...coinForm, isUngraded: true })}
-                      className="text-knox-600 focus:ring-knox-500"
-                    />
-                    <span className="text-sm flex items-center gap-1">
-                      <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                      Ungraded
-                    </span>
-                  </label>
-                </div>
               </div>
               <div className="flex gap-3 pt-4">
                 <button type="button" onClick={() => setEditingCoin(null)} className="btn btn-secondary flex-1">
@@ -936,7 +847,7 @@ export default function Settings() {
                     .filter(ct => ct.coin_type_id !== mergingCoin.id)
                     .map(ct => (
                       <option key={ct.coin_type_id} value={ct.coin_type_id}>
-                        {ct.name} {ct.is_ungraded ? '(Ungraded)' : ''}
+                        {ct.name}
                       </option>
                     ))
                   }
