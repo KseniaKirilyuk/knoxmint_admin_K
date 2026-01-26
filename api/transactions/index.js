@@ -333,7 +333,10 @@ export default async function handler(req, res) {
       }
       
       // Bulk mappings
-      const { mappings } = req.body; // { "item_title": coinTypeId, ... }
+      // Supports two formats:
+      // Old: { "item_title": coinTypeId }
+      // New: { "item_title": { coinTypeId, grade } }
+      const { mappings } = req.body;
       
       if (!mappings || typeof mappings !== 'object') {
         return res.status(400).json({ error: 'Mappings object required' });
@@ -344,18 +347,23 @@ export default async function handler(req, res) {
       // Track assigned quantities during this mapping operation
       const assignedDuringMapping = {};
       
-      for (const [itemTitle, rawCoinTypeId] of Object.entries(mappings)) {
-        if (!rawCoinTypeId) continue;
+      for (const [itemTitle, mappingValue] of Object.entries(mappings)) {
+        if (!mappingValue) continue;
         
-        // Ensure coinTypeId is an integer
-        const coinTypeId = parseInt(rawCoinTypeId);
-        if (isNaN(coinTypeId)) {
-          console.error(`Invalid coinTypeId for "${itemTitle}": ${rawCoinTypeId}`);
-          continue;
+        // Handle both old format (just coinTypeId) and new format ({ coinTypeId, grade })
+        let coinTypeId, grade;
+        if (typeof mappingValue === 'object') {
+          coinTypeId = parseInt(mappingValue.coinTypeId);
+          grade = mappingValue.grade || null;
+        } else {
+          coinTypeId = parseInt(mappingValue);
+          grade = parseGradeFromTitle(itemTitle); // Fall back to auto-detection
         }
         
-        // Parse grade from item title
-        const grade = parseGradeFromTitle(itemTitle);
+        if (isNaN(coinTypeId)) {
+          console.error(`Invalid coinTypeId for "${itemTitle}": ${mappingValue}`);
+          continue;
+        }
         
         // Get all unmapped sales with this title
         const unmappedSales = await query(`

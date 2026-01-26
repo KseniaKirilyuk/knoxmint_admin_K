@@ -308,14 +308,18 @@ export default function Sales() {
     
     setApplyingMappings(true)
     try {
-      // Convert to format backend expects: { title: coinTypeId } 
-      // Backend will parse grade from title
-      const simpleMappings = {}
+      // Send mappings with grade info: { title: { coinTypeId, grade } }
+      const mappingsWithGrade = {}
       mappingsToApply.forEach(([title, mapping]) => {
-        simpleMappings[title] = mapping.coinTypeId
+        // Use selected grade, or fall back to auto-detected
+        const grade = mapping.grade !== undefined ? mapping.grade : parseGrade(title)
+        mappingsWithGrade[title] = {
+          coinTypeId: mapping.coinTypeId,
+          grade: grade
+        }
       })
       
-      const res = await api.put('/transactions', { mappings: simpleMappings })
+      const res = await api.put('/transactions', { mappings: mappingsWithGrade })
       alert(`Successfully updated ${res.data.updated} sales!`)
       setShowMappingModal(false)
       setTitleMappings({})
@@ -868,39 +872,45 @@ export default function Sales() {
                 <div className="space-y-4">
                   {unmappedTitles.map((item, idx) => {
                     const mapping = titleMappings[item.item_title] || {}
-                    const gradeLabel = mapping.gradeLabel || parseGradeLabel(item.item_title)
-                    const grade = mapping.grade || parseGrade(item.item_title)
+                    const detectedGradeLabel = parseGradeLabel(item.item_title)
+                    const currentGrade = mapping.grade !== undefined ? mapping.grade : parseGrade(item.item_title)
                     
                     return (
                       <div key={idx} className="p-4 bg-slate-50 rounded-lg">
-                        <div className="flex items-start gap-4">
+                        <div className="flex items-start gap-3">
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <p className="text-sm font-medium text-slate-900 truncate" title={item.item_title}>
-                                {item.item_title}
-                              </p>
-                              {gradeLabel && (
-                                <span className={`px-2 py-0.5 rounded text-xs font-medium flex-shrink-0 ${
-                                  grade === '70' ? 'bg-emerald-100 text-emerald-700' : 
-                                  grade === '69' ? 'bg-blue-100 text-blue-700' : 
-                                  'bg-slate-100 text-slate-600'
-                                }`}>
-                                  {gradeLabel}
-                                </span>
-                              )}
-                              {!gradeLabel && (
-                                <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-xs font-medium flex-shrink-0">
-                                  No Grade
-                                </span>
-                              )}
-                            </div>
+                            <p className="text-sm font-medium text-slate-900 truncate" title={item.item_title}>
+                              {item.item_title}
+                            </p>
                             <p className="text-xs text-slate-500 mt-1">
                               {item.count} sale{item.count > 1 ? 's' : ''} • ${parseFloat(item.total_revenue).toLocaleString()} revenue
+                              {detectedGradeLabel && <span className="text-slate-400"> • Detected: {detectedGradeLabel}</span>}
                             </p>
                           </div>
-                          <div className="flex-shrink-0 w-64">
+                          <div className="flex-shrink-0 flex items-center gap-2">
+                            {/* Grade selector */}
                             <select
-                              className="input w-full text-sm"
+                              className={`input w-28 text-sm ${
+                                currentGrade === '70' ? 'border-emerald-300 bg-emerald-50' : 
+                                currentGrade === '69' ? 'border-blue-300 bg-blue-50' : 
+                                'border-amber-300 bg-amber-50'
+                              }`}
+                              value={currentGrade || ''}
+                              onChange={(e) => setTitleMappings(prev => ({
+                                ...prev,
+                                [item.item_title]: {
+                                  ...prev[item.item_title],
+                                  grade: e.target.value || null
+                                }
+                              }))}
+                            >
+                              <option value="">Ungraded</option>
+                              <option value="70">MS70/PR70</option>
+                              <option value="69">MS69/PR69</option>
+                            </select>
+                            {/* Coin type selector */}
+                            <select
+                              className="input w-48 text-sm"
                               value={mapping.coinTypeId || ''}
                               onChange={(e) => setTitleMappings(prev => ({
                                 ...prev,
