@@ -503,44 +503,47 @@ export default function Batches() {
       })
     }
     
-    // Group batch coins by catalog_id to pair graded/ungraded variants
+    // Group batch coins by coin_type_id to get all grades
     const coinGroups = {}
     batchCoins.forEach(bc => {
-      const catalogId = bc.catalog_id || bc.short_code?.replace('-UNGRADED', '') || bc.coin_type_name.replace(' (Ungraded)', '')
-      if (!coinGroups[catalogId]) {
-        coinGroups[catalogId] = { graded: null, ungraded: null }
+      const coinTypeId = bc.coin_type_id
+      if (!coinGroups[coinTypeId]) {
+        coinGroups[coinTypeId] = {
+          coinTypeId,
+          catalogId: bc.catalog_id || bc.short_code || bc.coin_type_name,
+          coinName: bc.coin_type_name,
+          is_ungraded: bc.is_ungraded,
+          grades: {} // { '70': qty, '69': qty, null: qty }
+        }
       }
-      if (bc.is_ungraded) {
-        coinGroups[catalogId].ungraded = bc
-      } else {
-        coinGroups[catalogId].graded = bc
-      }
+      const gradeKey = bc.grade || 'ungraded'
+      coinGroups[coinTypeId].grades[gradeKey] = bc.total_contributed || 0
     })
     
     // Build split data from batch_coins (inventory)
-    const data = Object.entries(coinGroups)
-      .filter(([_, group]) => {
-        // Include if graded coin type has contributions
-        return group.graded && contribTotals[group.graded.coin_type_id] > 0
-      })
-      .map(([catalogId, group]) => {
+    const data = Object.values(coinGroups)
+      .filter(group => !group.is_ungraded && contribTotals[group.coinTypeId] > 0)
+      .map(group => {
         // Total coins = sum of contributions for this coin type
-        const total = contribTotals[group.graded.coin_type_id] || 0
-        // Current graded inventory (from batch_coins)
-        const currentGraded = group.graded?.total_contributed || total
-        // Current ungraded inventory (from batch_coins)
-        const currentUngraded = group.ungraded?.total_contributed || 0
+        const total = contribTotals[group.coinTypeId] || 0
+        // Current grade quantities from batch_coins
+        const current70 = group.grades['70'] || 0
+        const current69 = group.grades['69'] || 0
+        const currentUngraded = group.grades['ungraded'] || 0
+        // If no grades recorded yet, default all to "unassigned" (show as 70)
+        const hasGrades = current70 > 0 || current69 > 0 || currentUngraded > 0
         
         return {
-          catalogId,
-          coinTypeId: group.graded?.coin_type_id,
-          ungradedCoinTypeId: group.ungraded?.coin_type_id,
-          coinName: group.graded?.coin_type_name,
+          catalogId: group.catalogId,
+          coinTypeId: group.coinTypeId,
+          coinName: group.coinName,
           total, // Total coins from contributions (doesn't change)
-          graded: currentGraded,
-          ungraded: currentUngraded,
-          originalGraded: currentGraded,
-          originalUngraded: currentUngraded
+          ms70: hasGrades ? current70 : total,
+          ms69: hasGrades ? current69 : 0,
+          ungraded: hasGrades ? currentUngraded : 0,
+          original70: hasGrades ? current70 : total,
+          original69: hasGrades ? current69 : 0,
+          originalUngraded: hasGrades ? currentUngraded : 0
         }
       })
     setSplitData(data)
@@ -555,12 +558,34 @@ export default function Batches() {
       const cleanValue = value.toString().replace(/^0+/, '') || '0'
       const val = Math.max(0, parseInt(cleanValue) || 0)
       
-      if (field === 'graded') {
-        item.graded = Math.min(val, item.total)
-        item.ungraded = item.total - item.graded
-      } else {
-        item.ungraded = Math.min(val, item.total)
-        item.graded = item.total - item.ungraded
+      // Update the changed field
+      item[field] = Math.min(val, item.total)
+      
+      // Calculate remaining and distribute
+      const remaining = item.total - item[field]
+      
+      if (field === 'ms70') {
+        // Adjust ms69 first, then ungraded gets the rest
+        if (item.ms69 > remaining) {
+          item.ms69 = remaining
+          item.ungraded = 0
+        } else {
+          item.ungraded = remaining - item.ms69
+        }
+      } else if (field === 'ms69') {
+        if (item.ms70 > remaining) {
+          item.ms70 = remaining
+          item.ungraded = 0
+        } else {
+          item.ungraded = remaining - item.ms70
+        }
+      } else { // ungraded
+        if (item.ms70 > remaining) {
+          item.ms70 = remaining
+          item.ms69 = 0
+        } else {
+          item.ms69 = remaining - item.ms70
+        }
       }
       
       updated[index] = item
@@ -570,14 +595,14 @@ export default function Batches() {
 
   const handleSplitGradingResults = async () => {
     try {
-      // Include all items where the split has changed from original
+      // Include all items where any grade has changed
       const splits = splitData
-        .filter(s => s.graded !== s.originalGraded || s.ungraded !== s.originalUngraded)
+        .filter(s => s.ms70 !== s.original70 || s.ms69 !== s.original69 || s.ungraded !== s.originalUngraded)
         .map(s => ({
           coinTypeId: s.coinTypeId,
-          ungradedCoinTypeId: s.ungradedCoinTypeId,
           catalogId: s.catalogId,
-          graded: s.graded,
+          ms70: s.ms70,
+          ms69: s.ms69,
           ungraded: s.ungraded
         }))
       
@@ -600,9 +625,9 @@ export default function Batches() {
         const summary = response.data.results.map(r => 
           r.error 
             ? `${r.catalogId || r.coinTypeId}: ${r.error}` 
-            : `${r.catalogId}: ${r.graded} graded, ${r.ungraded} ungraded`
+            : `${r.catalogId}: ${r.ms70} MS70, ${r.ms69} MS69, ${r.ungraded} ungraded`
         ).join('\n')
-        alert('Split updated!\n\n' + summary)
+        alert('Grading results saved!\n\n' + summary)
       }
       
       setShowSplitModal(false)
@@ -2150,7 +2175,7 @@ export default function Batches() {
             <div className="px-6 py-4 border-b flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-semibold">Grading Results</h2>
-                <p className="text-sm text-slate-500">Record how many coins came back graded vs ungraded</p>
+                <p className="text-sm text-slate-500">Record how many coins came back at each grade</p>
               </div>
               <button onClick={() => setShowSplitModal(false)} className="p-2 hover:bg-slate-100 rounded-lg">
                 <X className="w-5 h-5" />
@@ -2165,7 +2190,7 @@ export default function Batches() {
                 </div>
               ) : (
                 splitData.map((item, index) => (
-                  <div key={item.catalogId} className="border rounded-lg p-4">
+                  <div key={item.coinTypeId} className="border rounded-lg p-4">
                     <div className="flex items-center justify-between mb-3">
                       <div>
                         <p className="font-medium text-slate-900">{item.coinName}</p>
@@ -2173,12 +2198,12 @@ export default function Batches() {
                       </div>
                       <span className="text-sm text-slate-600">Total: {item.total} coins</span>
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-3 gap-3">
                       <div>
                         <label className="block text-sm font-medium text-emerald-700 mb-1">
-                          Graded
-                          {item.originalGraded !== item.total && (
-                            <span className="font-normal text-slate-400 ml-2">was {item.originalGraded}</span>
+                          MS70
+                          {item.original70 !== item.ms70 && (
+                            <span className="font-normal text-slate-400 ml-1">was {item.original70}</span>
                           )}
                         </label>
                         <input
@@ -2186,16 +2211,33 @@ export default function Batches() {
                           min="0"
                           max={item.total}
                           className="input"
-                          value={item.graded}
-                          onChange={(e) => updateSplitQuantity(index, 'graded', e.target.value)}
+                          value={item.ms70}
+                          onChange={(e) => updateSplitQuantity(index, 'ms70', e.target.value)}
+                          onFocus={(e) => e.target.select()}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-blue-700 mb-1">
+                          MS69
+                          {item.original69 !== item.ms69 && (
+                            <span className="font-normal text-slate-400 ml-1">was {item.original69}</span>
+                          )}
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          max={item.total}
+                          className="input"
+                          value={item.ms69}
+                          onChange={(e) => updateSplitQuantity(index, 'ms69', e.target.value)}
                           onFocus={(e) => e.target.select()}
                         />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-amber-700 mb-1">
                           Ungraded
-                          {item.originalUngraded > 0 && (
-                            <span className="font-normal text-slate-400 ml-2">was {item.originalUngraded}</span>
+                          {item.originalUngraded !== item.ungraded && (
+                            <span className="font-normal text-slate-400 ml-1">was {item.originalUngraded}</span>
                           )}
                         </label>
                         <input
@@ -2209,9 +2251,9 @@ export default function Batches() {
                         />
                       </div>
                     </div>
-                    {item.ungraded !== item.originalUngraded && item.ungraded > 0 && item.originalUngraded === 0 && (
-                      <p className="text-xs text-amber-600 mt-2">
-                        Will create "{item.coinName} (Ungraded)" coin type
+                    {(item.ms70 + item.ms69 + item.ungraded) !== item.total && (
+                      <p className="text-xs text-red-600 mt-2">
+                        ⚠️ Total ({item.ms70 + item.ms69 + item.ungraded}) doesn't match contributions ({item.total})
                       </p>
                     )}
                   </div>
@@ -2220,9 +2262,9 @@ export default function Batches() {
               
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                 <p className="text-sm text-blue-800">
-                  <strong>How it works:</strong> This records inventory (how many graded vs ungraded came back). 
+                  <strong>How it works:</strong> This records inventory by grade. 
                   Payouts are calculated based on each contributor's original share % applied to ALL sales from this batch.
-                  Set different costs for graded vs ungraded coins in "Edit Prices".
+                  Set different costs per grade in "Edit Prices".
                 </p>
               </div>
             </div>
@@ -2234,7 +2276,7 @@ export default function Batches() {
               <button 
                 onClick={handleSplitGradingResults} 
                 className="btn btn-primary flex-1"
-                disabled={!splitData.some(s => s.graded !== s.originalGraded || s.ungraded !== s.originalUngraded)}
+                disabled={!splitData.some(s => s.ms70 !== s.original70 || s.ms69 !== s.original69 || s.ungraded !== s.originalUngraded)}
               >
                 Save Grading Results
               </button>

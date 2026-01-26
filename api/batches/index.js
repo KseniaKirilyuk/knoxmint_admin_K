@@ -263,13 +263,13 @@ export default async function handler(req, res) {
         return res.json({ success: true });
       }
 
-      // Split grading results - updates batch_coins inventory only (NOT contributions)
+      // Split grading results - updates batch_coins inventory by grade (NOT contributions)
       // Contributions stay as original - payouts are based on original contribution %
       if (action === 'splitGradingResults') {
         await ensureCoinTypeColumns();
         await ensureCostColumn();
         const { batchId, splits } = req.body;
-        // splits = [{ coinTypeId: 1, ungradedCoinTypeId: 2, catalogId: '23XH', graded: 80, ungraded: 20 }, ...]
+        // splits = [{ coinTypeId: 1, catalogId: '23XH', ms70: 50, ms69: 30, ungraded: 20 }, ...]
         
         if (!batchId || !splits || !Array.isArray(splits)) {
           return res.status(400).json({ error: 'Batch ID and splits array required' });
@@ -282,112 +282,86 @@ export default async function handler(req, res) {
         const results = [];
 
         for (const split of splits) {
-          const { coinTypeId, ungradedCoinTypeId: existingUngradedId, catalogId, graded, ungraded } = split;
+          const { coinTypeId, catalogId, ms70 = 0, ms69 = 0, ungraded = 0 } = split;
           
-          const totalCoins = (graded || 0) + (ungraded || 0);
+          const totalCoins = ms70 + ms69 + ungraded;
           if (totalCoins === 0) {
             results.push({ catalogId, error: 'Total is 0' });
             continue;
           }
 
-          // Get base coin info
-          let gradedCoinTypeId = coinTypeId;
-          let baseName, baseCode, baseCatalogId;
-          let existingCostPerCoin = null;
-          let existingGradingCost = null;
-          
-          if (coinTypeId) {
-            const baseCoinInfo = await query(
-              'SELECT ct.name, ct.short_code, ct.catalog_id, bc.cost_per_coin, bc.grading_cost_per_coin FROM coin_types ct LEFT JOIN batch_coins bc ON ct.coin_type_id = bc.coin_type_id AND bc.batch_id = $2 WHERE ct.coin_type_id = $1', 
-              [coinTypeId, batchId]
-            );
-            
-            if (baseCoinInfo.rows.length === 0) {
-              results.push({ catalogId, coinTypeId, error: 'Coin type not found' });
-              continue;
-            }
-            
-            baseName = baseCoinInfo.rows[0].name.replace(' (Ungraded)', '');
-            baseCode = baseCoinInfo.rows[0].short_code?.replace('-UNGRADED', '') || catalogId || String(coinTypeId);
-            baseCatalogId = baseCoinInfo.rows[0].catalog_id || catalogId || baseCode;
-            existingCostPerCoin = baseCoinInfo.rows[0].cost_per_coin;
-            existingGradingCost = baseCoinInfo.rows[0].grading_cost_per_coin;
-          }
-          
-          if (!baseName) {
-            results.push({ catalogId, error: 'Could not determine coin type info' });
+          if (!coinTypeId) {
+            results.push({ catalogId, error: 'Coin type ID required' });
             continue;
           }
 
-          // Find or create the ungraded variant coin type
-          let ungradedCoinTypeId = existingUngradedId;
+          // Get existing cost info for this coin type
+          const existingInfo = await query(
+            `SELECT bc.cost_per_coin, bc.grading_cost_per_coin 
+             FROM batch_coins bc 
+             WHERE bc.batch_id = $1 AND bc.coin_type_id = $2 
+             LIMIT 1`,
+            [batchId, coinTypeId]
+          );
           
-          if (!ungradedCoinTypeId && ungraded > 0) {
-            const ungradedCoin = await query(
-              `SELECT coin_type_id FROM coin_types 
-               WHERE (catalog_id = $1 AND is_ungraded = true) 
-                  OR (short_code = $2 AND is_ungraded = true) LIMIT 1`,
-              [baseCatalogId, `${baseCode}-UNGRADED`]
-            );
-            
-            if (ungradedCoin.rows.length === 0) {
-              // Create ungraded variant
-              const ungradedName = `${baseName} (Ungraded)`;
-              
-              const existingName = await query(
-                'SELECT coin_type_id FROM coin_types WHERE name = $1',
-                [ungradedName]
+          const existingCostPerCoin = existingInfo.rows[0]?.cost_per_coin || null;
+          const existingGradingCost = existingInfo.rows[0]?.grading_cost_per_coin || null;
+
+          // Helper to upsert batch_coins by grade
+          const upsertGrade = async (grade, quantity) => {
+            if (quantity > 0) {
+              // Check if row exists
+              const existing = await query(
+                `SELECT id FROM batch_coins 
+                 WHERE batch_id = $1 AND coin_type_id = $2 
+                 AND (grade = $3 OR (grade IS NULL AND $3 IS NULL))`,
+                [batchId, coinTypeId, grade]
               );
               
-              if (existingName.rows.length > 0) {
-                ungradedCoinTypeId = existingName.rows[0].coin_type_id;
+              if (existing.rows.length > 0) {
                 await query(
-                  'UPDATE coin_types SET is_ungraded = true, catalog_id = $1 WHERE coin_type_id = $2',
-                  [baseCatalogId, ungradedCoinTypeId]
+                  `UPDATE batch_coins SET total_contributed = $1, updated_at = CURRENT_TIMESTAMP
+                   WHERE batch_id = $2 AND coin_type_id = $3 
+                   AND (grade = $4 OR (grade IS NULL AND $4 IS NULL))`,
+                  [quantity, batchId, coinTypeId, grade]
                 );
               } else {
-                const newUngraded = await query(
-                  `INSERT INTO coin_types (name, short_code, catalog_id, is_ungraded, keywords)
-                   VALUES ($1, $2, $3, true, $4)
-                   RETURNING coin_type_id`,
-                  [ungradedName, `${baseCode}-UNGRADED`, baseCatalogId, [baseName, baseCatalogId]]
+                await query(
+                  `INSERT INTO batch_coins (batch_id, coin_type_id, grade, total_contributed, cost_per_coin, grading_cost_per_coin)
+                   VALUES ($1, $2, $3, $4, $5, $6)`,
+                  [batchId, coinTypeId, grade, quantity, existingCostPerCoin, grade ? existingGradingCost : 0]
                 );
-                ungradedCoinTypeId = newUngraded.rows[0].coin_type_id;
               }
             } else {
-              ungradedCoinTypeId = ungradedCoin.rows[0].coin_type_id;
+              // Set to 0 or delete if quantity is 0
+              await query(
+                `UPDATE batch_coins SET total_contributed = 0, updated_at = CURRENT_TIMESTAMP
+                 WHERE batch_id = $1 AND coin_type_id = $2 
+                 AND (grade = $3 OR (grade IS NULL AND $3 IS NULL))`,
+                [batchId, coinTypeId, grade]
+              );
             }
-          }
+          };
 
-          // Update batch_coins for graded (inventory tracking only)
-          await query(`
-            INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed, cost_per_coin, grading_cost_per_coin)
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (batch_id, coin_type_id)
-            DO UPDATE SET total_contributed = $3
-          `, [batchId, gradedCoinTypeId, graded, existingCostPerCoin, existingGradingCost]);
+          // Update/create rows for each grade
+          await upsertGrade('70', ms70);
+          await upsertGrade('69', ms69);
+          await upsertGrade(null, ungraded); // null grade = ungraded
 
-          // Update batch_coins for ungraded (inventory tracking only)
-          if (ungradedCoinTypeId && ungraded > 0) {
-            // Copy the coin cost from graded, grading cost can be set separately
-            await query(`
-              INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed, cost_per_coin)
-              VALUES ($1, $2, $3, $4)
-              ON CONFLICT (batch_id, coin_type_id)
-              DO UPDATE SET total_contributed = $3
-            `, [batchId, ungradedCoinTypeId, ungraded, existingCostPerCoin]);
-          } else if (ungradedCoinTypeId) {
-            // Set ungraded to 0
-            await query(`
-              UPDATE batch_coins SET total_contributed = 0 WHERE batch_id = $1 AND coin_type_id = $2
-            `, [batchId, ungradedCoinTypeId]);
-          }
+          // Clean up any old rows without grade (from before this update)
+          // that aren't the ungraded row we just handled
+          await query(
+            `DELETE FROM batch_coins 
+             WHERE batch_id = $1 AND coin_type_id = $2 
+             AND grade IS NULL AND total_contributed = 0`,
+            [batchId, coinTypeId]
+          );
 
           results.push({ 
             catalogId,
-            coinTypeId: gradedCoinTypeId, 
-            ungradedCoinTypeId, 
-            graded,
+            coinTypeId,
+            ms70,
+            ms69,
             ungraded
           });
         }
