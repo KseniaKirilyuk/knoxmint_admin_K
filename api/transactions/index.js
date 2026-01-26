@@ -9,6 +9,17 @@ function verifyToken(req) {
   } catch { return null; }
 }
 
+// Parse grade from eBay item title - looks for MS70, MS69, PR70, PR69, etc.
+function parseGradeFromTitle(title) {
+  if (!title) return null;
+  // Match patterns like MS70, MS69, PR70, PR69 (case insensitive)
+  const match = title.match(/\b(?:MS|PR)\s*(70|69)\b/i);
+  if (match) {
+    return match[1]; // Returns '70' or '69'
+  }
+  return null; // No grade found = ungraded
+}
+
 export default async function handler(req, res) {
   const user = verifyToken(req);
   if (!user) return res.status(401).json({ error: 'Authentication required' });
@@ -48,7 +59,9 @@ export default async function handler(req, res) {
         FROM sales_transactions st
         LEFT JOIN batches b ON st.batch_id = b.batch_id
         LEFT JOIN coin_types ct ON st.coin_type_id = ct.coin_type_id
-        LEFT JOIN batch_coins bc ON st.batch_id = bc.batch_id AND st.coin_type_id = bc.coin_type_id
+        LEFT JOIN batch_coins bc ON st.batch_id = bc.batch_id 
+          AND st.coin_type_id = bc.coin_type_id
+          AND (st.grade = bc.grade OR (st.grade IS NULL AND bc.grade IS NULL))
         WHERE 1=1
       `;
       const params = [];
@@ -220,9 +233,10 @@ export default async function handler(req, res) {
         const { batchId, coinTypeId, saleDate, salePrice, ebayFee, advertisingFee, shippingCost, coinCost, grade, quantitySold } = req.body;
         
         // Get old batch_id to update sold counts later
-        const oldTx = await query('SELECT batch_id, coin_type_id, quantity_sold FROM sales_transactions WHERE transaction_id = $1', [transactionId]);
+        const oldTx = await query('SELECT batch_id, coin_type_id, grade, quantity_sold FROM sales_transactions WHERE transaction_id = $1', [transactionId]);
         const oldBatchId = oldTx.rows[0]?.batch_id;
         const oldCoinTypeId = oldTx.rows[0]?.coin_type_id;
+        const oldGrade = oldTx.rows[0]?.grade;
         const oldQty = oldTx.rows[0]?.quantity_sold || 1;
         
         // Get costs from new batch if batch is assigned
@@ -232,8 +246,10 @@ export default async function handler(req, res) {
         if (batchId && coinTypeId) {
           const batchCoinResult = await query(`
             SELECT cost_per_coin, grading_cost_per_coin 
-            FROM batch_coins WHERE batch_id = $1 AND coin_type_id = $2
-          `, [batchId, coinTypeId]);
+            FROM batch_coins 
+            WHERE batch_id = $1 AND coin_type_id = $2
+              AND (grade = $3 OR (grade IS NULL AND $3 IS NULL))
+          `, [batchId, coinTypeId, grade || null]);
           
           if (batchCoinResult.rows.length > 0) {
             const qty = parseInt(quantitySold) || 1;
@@ -290,21 +306,26 @@ export default async function handler(req, res) {
           transactionId
         ]);
         
-        // Update batch_coins sold counts if batch changed
-        if (oldBatchId !== (batchId ? parseInt(batchId) : null) || oldCoinTypeId !== (coinTypeId ? parseInt(coinTypeId) : null)) {
+        // Update batch_coins sold counts if batch/coin/grade changed
+        const newGrade = grade || null;
+        if (oldBatchId !== (batchId ? parseInt(batchId) : null) || 
+            oldCoinTypeId !== (coinTypeId ? parseInt(coinTypeId) : null) ||
+            oldGrade !== newGrade) {
           // Decrease old batch count
           if (oldBatchId && oldCoinTypeId) {
             await query(`
               UPDATE batch_coins SET total_sold = GREATEST(0, total_sold - $1)
               WHERE batch_id = $2 AND coin_type_id = $3
-            `, [oldQty, oldBatchId, oldCoinTypeId]);
+                AND (grade = $4 OR (grade IS NULL AND $4 IS NULL))
+            `, [oldQty, oldBatchId, oldCoinTypeId, oldGrade]);
           }
           // Increase new batch count
           if (batchId && coinTypeId) {
             await query(`
               UPDATE batch_coins SET total_sold = total_sold + $1
               WHERE batch_id = $2 AND coin_type_id = $3
-            `, [qty, batchId, coinTypeId]);
+                AND (grade = $4 OR (grade IS NULL AND $4 IS NULL))
+            `, [qty, batchId, coinTypeId, newGrade]);
           }
         }
         
@@ -333,6 +354,9 @@ export default async function handler(req, res) {
           continue;
         }
         
+        // Parse grade from item title
+        const grade = parseGradeFromTitle(itemTitle);
+        
         // Get all unmapped sales with this title
         const unmappedSales = await query(`
           SELECT transaction_id, quantity_sold, total_payout, sale_price
@@ -342,15 +366,16 @@ export default async function handler(req, res) {
             AND COALESCE(is_refund, false) = false
         `, [itemTitle]);
         
-        // Get all batches with this coin type (ordered by date for FIFO)
+        // Get all batches with this coin type AND grade (ordered by date for FIFO)
         const batches = await query(`
-          SELECT bc.batch_id, bc.cost_per_coin, bc.grading_cost_per_coin, bc.total_contributed, bc.total_sold
+          SELECT bc.batch_id, bc.cost_per_coin, bc.grading_cost_per_coin, bc.total_contributed, bc.total_sold, bc.grade
           FROM batch_coins bc
           JOIN batches b ON bc.batch_id = b.batch_id
           WHERE bc.coin_type_id = $1 
             AND bc.cost_per_coin IS NOT NULL
+            AND (bc.grade = $2 OR (bc.grade IS NULL AND $2 IS NULL))
           ORDER BY b.ship_date ASC NULLS LAST, b.created_at ASC
-        `, [coinTypeId]);
+        `, [coinTypeId, grade]);
         
         // Process each sale individually
         for (const sale of unmappedSales.rows) {
@@ -359,7 +384,7 @@ export default async function handler(req, res) {
           // Find first batch with available inventory
           let selectedBatch = null;
           for (const bc of batches.rows) {
-            const key = `${bc.batch_id}-${coinTypeId}`;
+            const key = `${bc.batch_id}-${coinTypeId}-${grade || 'null'}`;
             const alreadyAssigned = assignedDuringMapping[key] || 0;
             const totalSoldIncludingMapping = parseInt(bc.total_sold) + alreadyAssigned;
             const available = parseInt(bc.total_contributed) - totalSoldIncludingMapping;
@@ -388,25 +413,26 @@ export default async function handler(req, res) {
           const payout = totalPayout - totalGradingCost - profitShare;
           const profitMargin = salePrice > 0 ? profit / salePrice : 0;
           
-          // Update this sale
+          // Update this sale with grade
           await query(`
             UPDATE sales_transactions
             SET 
               coin_type_id = $1,
               batch_id = $2,
-              coin_cost = $3,
-              profit = $4,
-              profit_share = $5,
-              payout = $6,
-              profit_margin = $7
-            WHERE transaction_id = $8
-          `, [coinTypeId, batchId, totalCoinCost, profit, profitShare, payout, profitMargin, sale.transaction_id]);
+              grade = $3,
+              coin_cost = $4,
+              profit = $5,
+              profit_share = $6,
+              payout = $7,
+              profit_margin = $8
+            WHERE transaction_id = $9
+          `, [coinTypeId, batchId, grade, totalCoinCost, profit, profitShare, payout, profitMargin, sale.transaction_id]);
           
           updated++;
         }
       }
 
-      // Update batch_coins sold counts
+      // Update batch_coins sold counts by grade
       await query(`
         UPDATE batch_coins bc
         SET total_sold = (
@@ -414,6 +440,7 @@ export default async function handler(req, res) {
           FROM sales_transactions st
           WHERE st.batch_id = bc.batch_id
             AND st.coin_type_id = bc.coin_type_id
+            AND (st.grade = bc.grade OR (st.grade IS NULL AND bc.grade IS NULL))
             AND COALESCE(st.is_refund, false) = false
         )
       `);
@@ -502,14 +529,15 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Batch, coin type, date, and price are required' });
       }
 
-      // Get cost per coin from batch_coins (separate coin cost and grading cost)
+      // Get cost per coin from batch_coins (separate coin cost and grading cost) - match by grade
       const costResult = await query(`
         SELECT 
           COALESCE(cost_per_coin, 0) as coin_cost,
           COALESCE(grading_cost_per_coin, 0) as grading_cost
         FROM batch_coins
         WHERE batch_id = $1 AND coin_type_id = $2
-      `, [batchId, coinTypeId]);
+          AND (grade = $3 OR (grade IS NULL AND $3 IS NULL))
+      `, [batchId, coinTypeId, grade || null]);
 
       const coinCostPerUnit = costResult.rows.length > 0 ? parseFloat(costResult.rows[0].coin_cost) : 0;
       const gradingCostPerUnit = costResult.rows.length > 0 ? parseFloat(costResult.rows[0].grading_cost) : 0;
@@ -556,7 +584,7 @@ export default async function handler(req, res) {
         margin
       ]);
 
-      // Update batch_coins sold counts
+      // Update batch_coins sold counts by grade
       await query(`
         UPDATE batch_coins bc
         SET total_sold = (
@@ -564,10 +592,12 @@ export default async function handler(req, res) {
           FROM sales_transactions st
           WHERE st.batch_id = bc.batch_id
             AND st.coin_type_id = bc.coin_type_id
+            AND (st.grade = bc.grade OR (st.grade IS NULL AND bc.grade IS NULL))
             AND COALESCE(st.is_refund, false) = false
         )
         WHERE bc.coin_type_id = $1
-      `, [coinTypeId]);
+          AND (bc.grade = $2 OR (bc.grade IS NULL AND $2 IS NULL))
+      `, [coinTypeId, grade || null]);
 
       return res.json({ 
         success: true, 
