@@ -105,33 +105,42 @@ export default async function handler(req, res) {
         return res.json(result.rows);
       }
 
-      // Get breakdown for a specific batch
+      // Get breakdown for a specific batch - by member and coin type
       if (action === 'batchBreakdown') {
         if (!batchId) return res.status(400).json({ error: 'Batch ID required' });
         
         const result = await query(`
+          WITH batch_totals AS (
+            SELECT coin_type_id, SUM(quantity) as total_qty
+            FROM user_contributions
+            WHERE batch_id = $1 AND quantity > 0
+            GROUP BY coin_type_id
+          )
           SELECT 
+            u.user_id,
+            u.username,
+            u.full_name,
             ct.coin_type_id,
             ct.name as coin_type_name,
             ct.is_ungraded,
-            bc.total_contributed as pool,
-            COALESCE(SUM(st.quantity_sold), 0) as sold,
-            bc.cost_per_coin,
-            bc.grading_cost_per_coin,
-            COALESCE(SUM(st.total_payout), 0) as ebay_payout,
-            COALESCE(SUM(st.profit), 0) as profit,
-            COALESCE(SUM(st.profit_share), 0) as admin_share,
-            COALESCE(SUM(st.profit), 0) - COALESCE(SUM(st.profit_share), 0) as member_profit,
-            COALESCE(SUM(st.payout), 0) as member_payout
-          FROM batch_coins bc
-          JOIN coin_types ct ON bc.coin_type_id = ct.coin_type_id
-          LEFT JOIN sales_transactions st ON st.batch_id = bc.batch_id 
-            AND st.coin_type_id = bc.coin_type_id 
-            AND COALESCE(st.is_refund, false) = false
-            AND COALESCE(st.is_refunded, false) = false
-          WHERE bc.batch_id = $1
-          GROUP BY ct.coin_type_id, ct.name, ct.is_ungraded, bc.total_contributed, bc.cost_per_coin, bc.grading_cost_per_coin
-          ORDER BY ct.name
+            uc.quantity as user_contributed,
+            bt.total_qty as pool,
+            COALESCE(sales.sold, 0) as sold,
+            COALESCE(sales.total_payout * (uc.quantity::decimal / NULLIF(bt.total_qty, 0)), 0) as member_payout
+          FROM user_contributions uc
+          JOIN users u ON uc.user_id = u.user_id
+          JOIN coin_types ct ON uc.coin_type_id = ct.coin_type_id
+          JOIN batch_totals bt ON uc.coin_type_id = bt.coin_type_id
+          LEFT JOIN (
+            SELECT coin_type_id, SUM(quantity_sold) as sold, SUM(payout) as total_payout
+            FROM sales_transactions
+            WHERE batch_id = $1 
+              AND COALESCE(is_refund, false) = false
+              AND COALESCE(is_refunded, false) = false
+            GROUP BY coin_type_id
+          ) sales ON uc.coin_type_id = sales.coin_type_id
+          WHERE uc.batch_id = $1 AND uc.quantity > 0
+          ORDER BY u.full_name, ct.name
         `, [batchId]);
         return res.json(result.rows);
       }
