@@ -437,78 +437,76 @@ export default function Payouts() {
                   
                   {/* Expanded breakdown */}
                   {isExpanded && (
-                        <tr key={`${member.user_id}-breakdown`}>
-                          <td colSpan={7} className="p-0 border-t-0">
-                            <div className="bg-slate-50 px-6 py-4">
-                              {breakdown.length === 0 ? (
-                                <p className="text-sm text-slate-500">No contributions found for this member.</p>
-                              ) : (
-                                <div className="bg-white rounded-lg border overflow-hidden">
-                                  <table className="w-full text-sm">
-                                    <thead>
-                                      <tr className="bg-slate-100">
-                                        <th className="px-4 py-2 text-left font-medium text-slate-600">Batch</th>
-                                        <th className="px-4 py-2 text-left font-medium text-slate-600">Coin Type</th>
-                                        <th className="px-4 py-2 text-right font-medium text-slate-600">Contributed</th>
-                                        <th className="px-4 py-2 text-right font-medium text-slate-600">Sold</th>
-                                        <th className="px-4 py-2 text-right font-medium text-slate-600">Member Payout</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {breakdown.map((row, idx) => {
-                                        const memberPayout = parseFloat(row.member_payout) || 0
-                                        const sold = parseInt(row.sold) || 0
-                                        const isUngraded = row.is_ungraded
-                                        
-                                        return (
-                                        <tr key={idx} className="border-t hover:bg-slate-50">
-                                          <td className="px-4 py-2 text-slate-600">
-                                            {row.batch_name || `Batch ${row.batch_id}`}
-                                          </td>
-                                          <td className="px-4 py-2">
-                                            <div className="flex items-center gap-2">
-                                              <span className="font-medium text-slate-900">
-                                                {row.coin_type_name?.replace(' (Ungraded)', '')}
-                                              </span>
-                                              {isUngraded ? (
-                                                <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-xs font-medium">
-                                                  UG
-                                                </span>
-                                              ) : (
-                                                <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded text-xs font-medium">
-                                                  GR
-                                                </span>
-                                              )}
-                                            </div>
-                                          </td>
-                                          <td className="px-4 py-2 text-right">{row.user_contributed}</td>
-                                          <td className="px-4 py-2 text-right">
-                                            {sold > 0 ? (
-                                              <span className="text-emerald-600">{sold}</span>
-                                            ) : (
-                                              <span className="text-slate-400">0</span>
-                                            )}
-                                          </td>
-                                          <td className="px-4 py-2 text-right font-medium">
-                                            {sold === 0 ? (
-                                              <span className="text-slate-400">—</span>
-                                            ) : memberPayout > 0 ? (
-                                              <span className="text-emerald-600">{formatCurrency(memberPayout)}</span>
-                                            ) : (
-                                              <span className="text-slate-500">{formatCurrency(memberPayout)}</span>
-                                            )}
-                                          </td>
-                                        </tr>
-                                        )
-                                      })}
-                                    </tbody>
-                                  </table>
-                                </div>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
+                    <div className="border-t">
+                      <div className="bg-slate-50 px-6 py-4">
+                        {breakdown.length === 0 ? (
+                          <p className="text-sm text-slate-500">No sales data found for this batch.</p>
+                        ) : (
+                          <div className="bg-white rounded-lg border overflow-hidden">
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="bg-slate-100">
+                                  <th className="px-4 py-2 text-left font-medium text-slate-600">Member</th>
+                                  <th className="px-4 py-2 text-left font-medium text-slate-600">Coin Type</th>
+                                  <th className="px-4 py-2 text-right font-medium text-slate-600">Contributed</th>
+                                  <th className="px-4 py-2 text-right font-medium text-slate-600">Sold</th>
+                                  <th className="px-4 py-2 text-right font-medium text-slate-600">Member Payout</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {breakdown.map((row, idx) => {
+                                  const rowMemberPayout = parseFloat(row.member_payout) || 0
+                                  const sold = parseInt(row.sold) || 0
+                                  const isUngraded = row.is_ungraded
+                                  
+                                  return (
+                                  <tr key={idx} className="border-t hover:bg-slate-50">
+                                    <td className="px-4 py-2 text-slate-600">
+                                      {row.full_name || row.username || 'Unknown'}
+                                    </td>
+                                    <td className="px-4 py-2">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-medium text-slate-900">
+                                          {row.coin_type_name?.replace(' (Ungraded)', '')}
+                                        </span>
+                                        {isUngraded ? (
+                                          <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-xs font-medium">
+                                            UG
+                                          </span>
+                                        ) : (
+                                          <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded text-xs font-medium">
+                                            GR
+                                          </span>
+                                        )}
+                                      </div>
+                                    </td>
+                                    <td className="px-4 py-2 text-right">{row.user_contributed}</td>
+                                    <td className="px-4 py-2 text-right">
+                                      {sold > 0 ? (
+                                        <span className="text-emerald-600">{sold}</span>
+                                      ) : (
+                                        <span className="text-slate-400">0</span>
+                                      )}
+                                    </td>
+                                    <td className="px-4 py-2 text-right font-medium">
+                                      {sold === 0 ? (
+                                        <span className="text-slate-400">—</span>
+                                      ) : rowMemberPayout > 0 ? (
+                                        <span className="text-emerald-600">{formatCurrency(rowMemberPayout)}</span>
+                                      ) : (
+                                        <span className="text-slate-500">{formatCurrency(rowMemberPayout)}</span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                  )
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )
             })
