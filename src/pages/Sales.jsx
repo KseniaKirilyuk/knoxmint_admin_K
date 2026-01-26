@@ -703,10 +703,12 @@ export default function Sales() {
                               {tx.coin_type_name || tx.item_title || '-'}
                             </span>
                             {tx.coin_type_name && !isRefunded && (
-                              isUngraded ? (
-                                <span className="flex-shrink-0 px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-[10px] font-medium">UG</span>
+                              tx.grade === '70' ? (
+                                <span className="flex-shrink-0 px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded text-[10px] font-medium">MS70</span>
+                              ) : tx.grade === '69' ? (
+                                <span className="flex-shrink-0 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-[10px] font-medium">MS69</span>
                               ) : (
-                                <span className="flex-shrink-0 px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded text-[10px] font-medium">GR</span>
+                                <span className="flex-shrink-0 px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-[10px] font-medium">No Grade</span>
                               )
                             )}
                           </div>
