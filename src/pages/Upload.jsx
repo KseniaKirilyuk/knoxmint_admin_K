@@ -45,10 +45,18 @@ export default function Upload() {
     if (e.dataTransfer.files?.[0]) handleFileSelect(e.dataTransfer.files[0])
   }, [])
 
+  // Extract grade number from title (returns '70', '69', or null)
   const extractGrade = (title) => {
     if (!title) return null
-    const match = title.match(/(MS|PR)\d{2}/i)
-    return match ? match[0].toUpperCase() : null
+    const match = title.match(/\b(?:MS|PR|RP)\s*(70|69)\b/i)
+    return match ? match[1] : null
+  }
+  
+  // Get full grade label for display (MS70, PR69, etc.)
+  const extractGradeLabel = (title) => {
+    if (!title) return null
+    const match = title.match(/\b((?:MS|PR|RP)\s*(?:70|69))/i)
+    return match ? match[1].toUpperCase().replace(/\s/g, '') : null
   }
 
   // Check if item title looks like a coin
@@ -300,16 +308,23 @@ export default function Upload() {
         const isCoin = looksLikeCoin(title)
         initialIncluded[title] = isCoin
         
+        // Auto-detect grade from title
+        const detectedGrade = extractGrade(title)
+        
         const match = findBestMatch(title)
         if (match) {
           initialMappings[title] = {
             action: 'map',
             coinTypeId: match.coin_type_id,
-            matchedName: match.name
+            matchedName: match.name,
+            grade: detectedGrade,
+            gradeLabel: extractGradeLabel(title)
           }
         } else {
           initialMappings[title] = {
-            action: 'skip'
+            action: 'skip',
+            grade: detectedGrade,
+            gradeLabel: extractGradeLabel(title)
           }
         }
       })
@@ -623,7 +638,23 @@ export default function Upload() {
 
                       {/* Action indicator */}
                       {isIncluded && (
-                        <div className="flex-shrink-0">
+                        <div className="flex-shrink-0 flex items-center gap-2">
+                          {/* Grade badge */}
+                          {mapping.gradeLabel && (
+                            <span className={`px-2 py-1 rounded text-xs font-medium ${
+                              mapping.grade === '70' ? 'bg-emerald-100 text-emerald-700' : 
+                              mapping.grade === '69' ? 'bg-blue-100 text-blue-700' : 
+                              'bg-slate-100 text-slate-600'
+                            }`}>
+                              {mapping.gradeLabel}
+                            </span>
+                          )}
+                          {!mapping.gradeLabel && mapping.action !== 'skip' && (
+                            <span className="px-2 py-1 bg-amber-100 text-amber-700 rounded text-xs font-medium">
+                              No Grade
+                            </span>
+                          )}
+                          
                           {mapping.action === 'map' && (
                             <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded text-xs">
                               → {mapping.matchedName}
@@ -676,27 +707,80 @@ export default function Upload() {
 
                         {/* Map to existing */}
                         {mapping.action === 'map' && (
-                          <div className="flex items-center gap-4">
-                            <label className="text-sm text-slate-600 w-20">Coin Type:</label>
-                            <select
-                              className="input text-sm flex-1"
-                              value={mapping.coinTypeId || ''}
-                              onChange={(e) => {
-                                const ct = coinTypes.find(c => c.coin_type_id === parseInt(e.target.value))
-                                updateMapping(title, { 
-                                  coinTypeId: parseInt(e.target.value),
-                                  matchedName: ct?.name 
-                                })
-                              }}
-                            >
-                              <option value="">Select coin type...</option>
-                              {coinTypes.map(ct => (
-                                <option key={ct.coin_type_id} value={ct.coin_type_id}>
-                                  {ct.name} - ${ct.original_price || 0}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
+                          <>
+                            <div className="flex items-center gap-4">
+                              <label className="text-sm text-slate-600 w-20">Coin Type:</label>
+                              <div className="flex-1 relative">
+                                <input
+                                  type="text"
+                                  className="input text-sm w-full"
+                                  placeholder="Search coin types..."
+                                  value={mapping.coinSearch || mapping.matchedName || ''}
+                                  onChange={(e) => {
+                                    updateMapping(title, { coinSearch: e.target.value, showDropdown: true })
+                                  }}
+                                  onFocus={() => updateMapping(title, { showDropdown: true })}
+                                />
+                                {mapping.showDropdown && (
+                                  <div className="absolute z-10 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                                    {coinTypes
+                                      .filter(ct => {
+                                        const search = (mapping.coinSearch || '').toLowerCase()
+                                        return !search || 
+                                          ct.name.toLowerCase().includes(search) ||
+                                          (ct.short_code || '').toLowerCase().includes(search)
+                                      })
+                                      .slice(0, 20)
+                                      .map(ct => (
+                                        <button
+                                          key={ct.coin_type_id}
+                                          className="w-full px-3 py-2 text-left text-sm hover:bg-slate-100 flex justify-between"
+                                          onClick={() => {
+                                            updateMapping(title, { 
+                                              coinTypeId: ct.coin_type_id,
+                                              matchedName: ct.name,
+                                              coinSearch: '',
+                                              showDropdown: false
+                                            })
+                                          }}
+                                        >
+                                          <span>{ct.name}</span>
+                                          {ct.short_code && <span className="text-slate-400">{ct.short_code}</span>}
+                                        </button>
+                                      ))
+                                    }
+                                    {coinTypes.filter(ct => {
+                                      const search = (mapping.coinSearch || '').toLowerCase()
+                                      return !search || ct.name.toLowerCase().includes(search)
+                                    }).length === 0 && (
+                                      <div className="px-3 py-2 text-sm text-slate-400">No matches</div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-4">
+                              <label className="text-sm text-slate-600 w-20">Grade:</label>
+                              <select
+                                className="input text-sm w-32"
+                                value={mapping.grade || ''}
+                                onChange={(e) => {
+                                  const grade = e.target.value || null
+                                  const gradeLabel = grade === '70' ? 'MS70' : grade === '69' ? 'MS69' : null
+                                  updateMapping(title, { grade, gradeLabel })
+                                }}
+                              >
+                                <option value="">Ungraded</option>
+                                <option value="70">MS70 / PR70</option>
+                                <option value="69">MS69 / PR69</option>
+                              </select>
+                              {mapping.gradeLabel && (
+                                <span className="text-xs text-slate-500">
+                                  Auto-detected: {extractGradeLabel(title)}
+                                </span>
+                              )}
+                            </div>
+                          </>
                         )}
 
                         {/* Create new */}
@@ -711,6 +795,27 @@ export default function Upload() {
                                 onChange={(e) => updateMapping(title, { newName: e.target.value })}
                                 placeholder="Coin type name"
                               />
+                            </div>
+                            <div className="flex items-center gap-4">
+                              <label className="text-sm text-slate-600 w-20">Grade:</label>
+                              <select
+                                className="input text-sm w-32"
+                                value={mapping.grade || ''}
+                                onChange={(e) => {
+                                  const grade = e.target.value || null
+                                  const gradeLabel = grade === '70' ? 'MS70' : grade === '69' ? 'MS69' : null
+                                  updateMapping(title, { grade, gradeLabel })
+                                }}
+                              >
+                                <option value="">Ungraded</option>
+                                <option value="70">MS70 / PR70</option>
+                                <option value="69">MS69 / PR69</option>
+                              </select>
+                              {mapping.gradeLabel && (
+                                <span className="text-xs text-slate-500">
+                                  Auto-detected: {extractGradeLabel(title)}
+                                </span>
+                              )}
                             </div>
                             <div className="flex items-center gap-4">
                               <label className="text-sm text-slate-600 w-20">Cost:</label>

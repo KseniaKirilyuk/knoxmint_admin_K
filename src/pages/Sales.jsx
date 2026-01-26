@@ -2,6 +2,20 @@ import React, { useState, useEffect, useRef } from 'react'
 import { Search, Download, ChevronLeft, ChevronRight, ChevronDown, Trash2, TrendingUp, TrendingDown, AlertTriangle, X, Wand2, Edit2, Plus } from 'lucide-react'
 import api from '../lib/api'
 
+// Parse grade number from title (returns '70', '69', or null)
+const parseGrade = (title) => {
+  if (!title) return null
+  const match = title.match(/\b(?:MS|PR|RP)\s*(70|69)\b/i)
+  return match ? match[1] : null
+}
+
+// Get full grade label for display
+const parseGradeLabel = (title) => {
+  if (!title) return null
+  const match = title.match(/\b((?:MS|PR|RP)\s*(?:70|69))/i)
+  return match ? match[1].toUpperCase().replace(/\s/g, '') : null
+}
+
 export default function Sales() {
   const [transactions, setTransactions] = useState([])
   const [coinTypes, setCoinTypes] = useState([])
@@ -29,7 +43,7 @@ export default function Sales() {
   const [selectedCoinName, setSelectedCoinName] = useState('All Coin Types')
   const coinSearchRef = useRef(null)
   
-  // Bulk mapping state
+  // Bulk mapping state - now { title: { coinTypeId, grade, gradeLabel } }
   const [showMappingModal, setShowMappingModal] = useState(false)
   const [unmappedTitles, setUnmappedTitles] = useState([])
   const [titleMappings, setTitleMappings] = useState({})
@@ -236,24 +250,43 @@ export default function Sales() {
       const res = await api.get('/transactions?action=unmappedTitles')
       setUnmappedTitles(res.data)
       
-      // Auto-suggest mappings based on keywords
+      // Auto-suggest mappings based on keywords, include auto-detected grade
       const suggestions = {}
       res.data.forEach(item => {
         const titleLower = item.item_title?.toLowerCase() || ''
+        const detectedGrade = parseGrade(item.item_title)
+        const gradeLabel = parseGradeLabel(item.item_title)
+        
         for (const ct of coinTypes) {
           const ctNameLower = ct.name.toLowerCase()
           // Check if coin type name or keywords match
           if (titleLower.includes(ctNameLower)) {
-            suggestions[item.item_title] = ct.coin_type_id
+            suggestions[item.item_title] = { 
+              coinTypeId: ct.coin_type_id, 
+              grade: detectedGrade,
+              gradeLabel
+            }
             break
           }
           if (ct.keywords) {
             for (const kw of ct.keywords) {
               if (titleLower.includes(kw.toLowerCase())) {
-                suggestions[item.item_title] = ct.coin_type_id
+                suggestions[item.item_title] = { 
+                  coinTypeId: ct.coin_type_id,
+                  grade: detectedGrade,
+                  gradeLabel
+                }
                 break
               }
             }
+          }
+        }
+        // If no match but has title, still store grade info
+        if (!suggestions[item.item_title]) {
+          suggestions[item.item_title] = { 
+            coinTypeId: null, 
+            grade: detectedGrade,
+            gradeLabel
           }
         }
       })
@@ -266,7 +299,8 @@ export default function Sales() {
   }
 
   const applyMappings = async () => {
-    const mappingsToApply = Object.entries(titleMappings).filter(([_, v]) => v)
+    // Filter to only titles with a coin type selected
+    const mappingsToApply = Object.entries(titleMappings).filter(([_, v]) => v?.coinTypeId)
     if (mappingsToApply.length === 0) {
       alert('Please select at least one mapping')
       return
@@ -274,7 +308,14 @@ export default function Sales() {
     
     setApplyingMappings(true)
     try {
-      const res = await api.put('/transactions', { mappings: titleMappings })
+      // Convert to format backend expects: { title: coinTypeId } 
+      // Backend will parse grade from title
+      const simpleMappings = {}
+      mappingsToApply.forEach(([title, mapping]) => {
+        simpleMappings[title] = mapping.coinTypeId
+      })
+      
+      const res = await api.put('/transactions', { mappings: simpleMappings })
       alert(`Successfully updated ${res.data.updated} sales!`)
       setShowMappingModal(false)
       setTitleMappings({})
@@ -616,10 +657,7 @@ export default function Sales() {
                   const ebayFee = parseFloat(tx.ebay_fee) || 0
                   const advertisingFee = parseFloat(tx.advertising_fee) || 0
                   const shippingCost = parseFloat(tx.shipping_cost) || 0
-                  // For refunds: fees are returned (added back), for regular sales: fees are deducted
-                  const ebayPayout = isRefund 
-                    ? salePrice + ebayFee + advertisingFee + shippingCost
-                    : salePrice - ebayFee - advertisingFee - shippingCost
+                  const ebayPayout = salePrice - ebayFee - advertisingFee - shippingCost
                   
                   const unitCoinCost = parseFloat(tx.unit_coin_cost) || 0
                   const unitGradingCost = parseFloat(tx.unit_grading_cost) || 0
@@ -673,9 +711,9 @@ export default function Sales() {
                           {tx.sale_date?.split('T')[0]}
                         </td>
                         <td className={`table-cell text-right ${refundedClass}`}>{formatCurrency(tx.sale_price)}</td>
-                        <td className={`table-cell text-right ${isRefunded ? 'text-slate-400' : isRefund ? 'text-emerald-600' : 'text-red-600'}`}>{formatCurrency(isRefund ? Math.abs(tx.ebay_fee) : -Math.abs(tx.ebay_fee))}</td>
-                        <td className={`table-cell text-right ${isRefunded ? 'text-slate-400' : isRefund ? 'text-emerald-600' : 'text-red-600'}`}>{tx.advertising_fee > 0 ? formatCurrency(isRefund ? Math.abs(tx.advertising_fee) : -Math.abs(tx.advertising_fee)) : '-'}</td>
-                        <td className={`table-cell text-right ${isRefunded ? 'text-slate-400' : isRefund ? 'text-emerald-600' : 'text-amber-600'}`}>{tx.shipping_cost > 0 ? formatCurrency(isRefund ? Math.abs(tx.shipping_cost) : -Math.abs(tx.shipping_cost)) : '-'}</td>
+                        <td className={`table-cell text-right ${isRefunded ? 'text-slate-400' : 'text-red-600'}`}>{formatCurrency(-Math.abs(tx.ebay_fee))}</td>
+                        <td className={`table-cell text-right ${isRefunded ? 'text-slate-400' : 'text-red-600'}`}>{tx.advertising_fee > 0 ? formatCurrency(-tx.advertising_fee) : '-'}</td>
+                        <td className={`table-cell text-right ${isRefunded ? 'text-slate-400' : 'text-amber-600'}`}>{tx.shipping_cost > 0 ? formatCurrency(-tx.shipping_cost) : '-'}</td>
                         <td className={`table-cell text-right font-medium ${refundedClass}`}>{formatCurrency(ebayPayout)}</td>
                         <td className="table-cell">
                           {tx.batch_name ? (
@@ -828,44 +866,69 @@ export default function Sales() {
                 <p className="text-slate-500 text-center py-8">No unmapped sales found!</p>
               ) : (
                 <div className="space-y-4">
-                  {unmappedTitles.map((item, idx) => (
-                    <div key={idx} className="p-4 bg-slate-50 rounded-lg">
-                      <div className="flex items-start gap-4">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-slate-900 truncate" title={item.item_title}>
-                            {item.item_title}
-                          </p>
-                          <p className="text-xs text-slate-500 mt-1">
-                            {item.count} sale{item.count > 1 ? 's' : ''} • ${parseFloat(item.total_revenue).toLocaleString()} revenue
-                          </p>
-                        </div>
-                        <div className="flex-shrink-0 w-64">
-                          <select
-                            className="input w-full text-sm"
-                            value={titleMappings[item.item_title] || ''}
-                            onChange={(e) => setTitleMappings(prev => ({
-                              ...prev,
-                              [item.item_title]: e.target.value ? parseInt(e.target.value) : null
-                            }))}
-                          >
-                            <option value="">— Select coin type —</option>
-                            {coinTypes.map(ct => (
-                              <option key={ct.coin_type_id} value={ct.coin_type_id}>
-                                {ct.name}
-                              </option>
-                            ))}
-                          </select>
+                  {unmappedTitles.map((item, idx) => {
+                    const mapping = titleMappings[item.item_title] || {}
+                    const gradeLabel = mapping.gradeLabel || parseGradeLabel(item.item_title)
+                    const grade = mapping.grade || parseGrade(item.item_title)
+                    
+                    return (
+                      <div key={idx} className="p-4 bg-slate-50 rounded-lg">
+                        <div className="flex items-start gap-4">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-medium text-slate-900 truncate" title={item.item_title}>
+                                {item.item_title}
+                              </p>
+                              {gradeLabel && (
+                                <span className={`px-2 py-0.5 rounded text-xs font-medium flex-shrink-0 ${
+                                  grade === '70' ? 'bg-emerald-100 text-emerald-700' : 
+                                  grade === '69' ? 'bg-blue-100 text-blue-700' : 
+                                  'bg-slate-100 text-slate-600'
+                                }`}>
+                                  {gradeLabel}
+                                </span>
+                              )}
+                              {!gradeLabel && (
+                                <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-xs font-medium flex-shrink-0">
+                                  No Grade
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-500 mt-1">
+                              {item.count} sale{item.count > 1 ? 's' : ''} • ${parseFloat(item.total_revenue).toLocaleString()} revenue
+                            </p>
+                          </div>
+                          <div className="flex-shrink-0 w-64">
+                            <select
+                              className="input w-full text-sm"
+                              value={mapping.coinTypeId || ''}
+                              onChange={(e) => setTitleMappings(prev => ({
+                                ...prev,
+                                [item.item_title]: {
+                                  ...prev[item.item_title],
+                                  coinTypeId: e.target.value ? parseInt(e.target.value) : null
+                                }
+                              }))}
+                            >
+                              <option value="">— Select coin type —</option>
+                              {coinTypes.map(ct => (
+                                <option key={ct.coin_type_id} value={ct.coin_type_id}>
+                                  {ct.short_code || ct.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
             </div>
             
             <div className="px-6 py-4 border-t bg-slate-50 flex items-center justify-between">
               <p className="text-sm text-slate-500">
-                {Object.values(titleMappings).filter(Boolean).length} of {unmappedTitles.length} mapped
+                {Object.values(titleMappings).filter(m => m?.coinTypeId).length} of {unmappedTitles.length} mapped
               </p>
               <div className="flex gap-3">
                 <button 
@@ -876,7 +939,7 @@ export default function Sales() {
                 </button>
                 <button 
                   onClick={applyMappings}
-                  disabled={applyingMappings || Object.values(titleMappings).filter(Boolean).length === 0}
+                  disabled={applyingMappings || Object.values(titleMappings).filter(m => m?.coinTypeId).length === 0}
                   className="btn btn-primary gap-2"
                 >
                   {applyingMappings ? (
