@@ -1074,13 +1074,28 @@ export default async function handler(req, res) {
       }
 
       // Update coin prices in batch (cost_per_coin and grading_cost_per_coin)
+      // Keys can be either "coinTypeId" (old format) or "coinTypeId-grade" (new format)
       if (batchId && (coinPrices || req.body.gradingCosts)) {
         await ensureCostColumn();
         const gradingCosts = req.body.gradingCosts || {};
         
+        // Helper to parse key into coinTypeId and grade
+        const parseKey = (key) => {
+          if (key.includes('-')) {
+            const parts = key.split('-');
+            const coinTypeId = parts[0];
+            const grade = parts[1] === 'null' ? null : parts[1];
+            return { coinTypeId, grade };
+          }
+          // Old format - just coinTypeId, update all grades
+          return { coinTypeId: key, grade: undefined };
+        };
+        
         // Update cost per coin
         if (coinPrices) {
-          for (const [coinTypeId, price] of Object.entries(coinPrices)) {
+          for (const [key, price] of Object.entries(coinPrices)) {
+            const { coinTypeId, grade } = parseKey(key);
+            
             // Only save if we have a valid positive price, otherwise null
             let priceValue = null;
             if (price !== '' && price !== null && price !== undefined) {
@@ -1090,17 +1105,31 @@ export default async function handler(req, res) {
                 priceValue = parsed;
               }
             }
-            await query(`
-              UPDATE batch_coins 
-              SET cost_per_coin = $1, updated_at = CURRENT_TIMESTAMP
-              WHERE batch_id = $2 AND coin_type_id = $3
-            `, [priceValue, batchId, coinTypeId]);
+            
+            if (grade === undefined) {
+              // Old format - update all rows for this coin type
+              await query(`
+                UPDATE batch_coins 
+                SET cost_per_coin = $1, updated_at = CURRENT_TIMESTAMP
+                WHERE batch_id = $2 AND coin_type_id = $3
+              `, [priceValue, batchId, coinTypeId]);
+            } else {
+              // New format - update specific grade row
+              await query(`
+                UPDATE batch_coins 
+                SET cost_per_coin = $1, updated_at = CURRENT_TIMESTAMP
+                WHERE batch_id = $2 AND coin_type_id = $3
+                  AND (grade = $4 OR (grade IS NULL AND $4 IS NULL))
+              `, [priceValue, batchId, coinTypeId, grade]);
+            }
           }
         }
         
         // Update grading cost per coin
         if (gradingCosts) {
-          for (const [coinTypeId, cost] of Object.entries(gradingCosts)) {
+          for (const [key, cost] of Object.entries(gradingCosts)) {
+            const { coinTypeId, grade } = parseKey(key);
+            
             let costValue = 0;
             if (cost !== '' && cost !== null && cost !== undefined) {
               const parsed = parseFloat(cost);
@@ -1108,11 +1137,23 @@ export default async function handler(req, res) {
                 costValue = parsed;
               }
             }
-            await query(`
-              UPDATE batch_coins 
-              SET grading_cost_per_coin = $1, updated_at = CURRENT_TIMESTAMP
-              WHERE batch_id = $2 AND coin_type_id = $3
-            `, [costValue, batchId, coinTypeId]);
+            
+            if (grade === undefined) {
+              // Old format - update all rows for this coin type
+              await query(`
+                UPDATE batch_coins 
+                SET grading_cost_per_coin = $1, updated_at = CURRENT_TIMESTAMP
+                WHERE batch_id = $2 AND coin_type_id = $3
+              `, [costValue, batchId, coinTypeId]);
+            } else {
+              // New format - update specific grade row
+              await query(`
+                UPDATE batch_coins 
+                SET grading_cost_per_coin = $1, updated_at = CURRENT_TIMESTAMP
+                WHERE batch_id = $2 AND coin_type_id = $3
+                  AND (grade = $4 OR (grade IS NULL AND $4 IS NULL))
+              `, [costValue, batchId, coinTypeId, grade]);
+            }
           }
         }
         

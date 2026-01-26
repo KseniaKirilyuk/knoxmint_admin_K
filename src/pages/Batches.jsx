@@ -1038,11 +1038,12 @@ export default function Batches() {
                         <h4 className="font-medium text-slate-900">Coin Types & Cost per Coin</h4>
                         <button 
                           onClick={() => {
-                            // Initialize prices and grading costs from current batch coins
+                            // Initialize prices and grading costs from current batch coins (by grade)
                             const prices = {}
                             const grading = {}
                             batchDetails.coins.forEach(c => {
-                              const key = String(c.coin_type_id)
+                              // Use coin_type_id + grade as unique key
+                              const key = `${c.coin_type_id}-${c.grade || 'null'}`
                               // Get raw value and ensure it's a number
                               const rawVal = c.cost_per_coin
                               const numVal = typeof rawVal === 'number' ? rawVal : parseFloat(rawVal)
@@ -1458,30 +1459,36 @@ export default function Batches() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4">
             <div className="flex items-center justify-between px-6 py-4 border-b">
-              <h2 className="text-lg font-semibold">Edit Costs per Coin</h2>
+              <h2 className="text-lg font-semibold">Edit Costs per Coin & Grade</h2>
               <button onClick={() => setShowPricesModal(false)} className="p-2 hover:bg-slate-100 rounded-lg">
                 <X className="w-5 h-5" />
               </button>
             </div>
             <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto">
               {batchDetails.coins?.map(coin => {
-                const key = String(coin.coin_type_id)
-                const isUngraded = coin.is_ungraded
+                // Use coin_type_id + grade as unique key
+                const key = `${coin.coin_type_id}-${coin.grade || 'null'}`
                 const remaining = coin.total_contributed - (coin.total_sold || 0)
                 return (
-                  <div key={coin.id} className="border rounded-lg p-3">
+                  <div key={key} className="border rounded-lg p-3">
                     <div className="flex items-center justify-between mb-2">
                       <div>
-                        <p className="font-medium">{coin.coin_type_name}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium">{coin.coin_type_name}</p>
+                          {coin.grade === '70' ? (
+                            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-xs font-medium">MS70</span>
+                          ) : coin.grade === '69' ? (
+                            <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-medium">MS69</span>
+                          ) : (
+                            <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-xs font-medium">No Grade</span>
+                          )}
+                        </div>
                         <p className="text-xs text-slate-500">
                           {coin.total_contributed} contributed • {coin.total_sold || 0} sold
                           {coin.refund_count > 0 && <span className="text-red-500"> • {coin.refund_count} refunded</span>}
                           {remaining > 0 && <span className="text-amber-600"> • {remaining} remaining</span>}
                         </p>
                       </div>
-                      {isUngraded && (
-                        <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded">Ungraded</span>
-                      )}
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
@@ -1494,7 +1501,7 @@ export default function Batches() {
                             pattern="[0-9]*\.?[0-9]*"
                             className="input pl-7 text-right"
                             placeholder="—"
-                            value={typeof coinPrices[key] === 'object' ? '' : (coinPrices[key] || '')}
+                            value={coinPrices[key] || ''}
                             onChange={(e) => {
                               const val = e.target.value.replace(/[^0-9.]/g, '')
                               setCoinPrices({
