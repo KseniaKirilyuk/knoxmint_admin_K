@@ -9,11 +9,11 @@ function verifyToken(req) {
   } catch { return null; }
 }
 
-// Parse grade from eBay item title - looks for MS70, MS69, PR70, PR69, etc.
+// Parse grade from eBay item title - looks for MS70, MS69, PR70, PR69, RP70, RP69, etc.
 function parseGradeFromTitle(title) {
   if (!title) return null;
-  // Match patterns like MS70, MS69, PR70, PR69 (case insensitive)
-  const match = title.match(/\b(?:MS|PR)\s*(70|69)\b/i);
+  // Match patterns like MS70, MS69, PR70, PR69, RP70, RP69 (case insensitive)
+  const match = title.match(/\b(?:MS|PR|RP)\s*(70|69)\b/i);
   if (match) {
     return match[1]; // Returns '70' or '69'
   }
