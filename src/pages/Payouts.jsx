@@ -442,54 +442,82 @@ export default function Payouts() {
                         {breakdown.length === 0 ? (
                           <p className="text-sm text-slate-500">No sales data found for this batch.</p>
                         ) : (
-                          <div className="bg-white rounded-lg border overflow-hidden">
-                            <table className="w-full text-sm">
-                              <thead>
-                                <tr className="bg-slate-100">
-                                  <th className="px-4 py-2 text-left font-medium text-slate-600">Member</th>
-                                  <th className="px-4 py-2 text-left font-medium text-slate-600">Coin Type</th>
-                                  <th className="px-4 py-2 text-right font-medium text-slate-600">Contributed</th>
-                                  <th className="px-4 py-2 text-right font-medium text-slate-600">Sold</th>
-                                  <th className="px-4 py-2 text-right font-medium text-slate-600">Member Payout</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {breakdown.map((row, idx) => {
-                                  const rowMemberPayout = parseFloat(row.member_payout) || 0
-                                  const sold = parseInt(row.sold) || 0
-                                  
-                                  return (
-                                  <tr key={idx} className="border-t hover:bg-slate-50">
-                                    <td className="px-4 py-2 text-slate-600">
-                                      {row.full_name || row.username || 'Unknown'}
-                                    </td>
-                                    <td className="px-4 py-2">
-                                      <span className="font-medium text-slate-900">
-                                        {row.coin_type_name?.replace(' (Ungraded)', '')}
+                          <div className="space-y-3">
+                            {(() => {
+                              // Group by coin type
+                              const grouped = breakdown.reduce((acc, row) => {
+                                const key = row.coin_type_id
+                                if (!acc[key]) {
+                                  acc[key] = {
+                                    coin_type_id: row.coin_type_id,
+                                    coin_type_name: row.coin_type_name?.replace(' (Ungraded)', ''),
+                                    members: []
+                                  }
+                                }
+                                acc[key].members.push(row)
+                                return acc
+                              }, {})
+                              
+                              return Object.values(grouped).map(coinType => {
+                                const totalContributed = coinType.members.reduce((sum, m) => sum + (parseInt(m.user_contributed) || 0), 0)
+                                const totalSold = coinType.members.reduce((sum, m) => sum + (parseInt(m.sold) || 0), 0)
+                                const totalPayout = coinType.members.reduce((sum, m) => sum + (parseFloat(m.member_payout) || 0), 0)
+                                
+                                return (
+                                  <div key={coinType.coin_type_id} className="bg-white rounded-lg border overflow-hidden">
+                                    {/* Coin type header */}
+                                    <div className="bg-slate-100 px-4 py-2 flex items-center justify-between">
+                                      <span className="font-medium text-slate-900">{coinType.coin_type_name}</span>
+                                      <span className="text-sm text-slate-600">
+                                        {totalContributed} contributed • {totalSold} sold • {formatCurrency(totalPayout)} payout
                                       </span>
-                                    </td>
-                                    <td className="px-4 py-2 text-right">{row.user_contributed}</td>
-                                    <td className="px-4 py-2 text-right">
-                                      {sold > 0 ? (
-                                        <span className="text-emerald-600">{sold}</span>
-                                      ) : (
-                                        <span className="text-slate-400">0</span>
-                                      )}
-                                    </td>
-                                    <td className="px-4 py-2 text-right font-medium">
-                                      {sold === 0 ? (
-                                        <span className="text-slate-400">—</span>
-                                      ) : rowMemberPayout > 0 ? (
-                                        <span className="text-emerald-600">{formatCurrency(rowMemberPayout)}</span>
-                                      ) : (
-                                        <span className="text-slate-500">{formatCurrency(rowMemberPayout)}</span>
-                                      )}
-                                    </td>
-                                  </tr>
-                                  )
-                                })}
-                              </tbody>
-                            </table>
+                                    </div>
+                                    {/* Member rows */}
+                                    <table className="w-full text-sm">
+                                      <thead>
+                                        <tr className="bg-slate-50 text-xs">
+                                          <th className="px-4 py-1.5 text-left font-medium text-slate-500">Member</th>
+                                          <th className="px-4 py-1.5 text-right font-medium text-slate-500">Contributed</th>
+                                          <th className="px-4 py-1.5 text-right font-medium text-slate-500">Sold</th>
+                                          <th className="px-4 py-1.5 text-right font-medium text-slate-500">Payout</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {coinType.members.map((row, idx) => {
+                                          const rowMemberPayout = parseFloat(row.member_payout) || 0
+                                          const sold = parseInt(row.sold) || 0
+                                          
+                                          return (
+                                            <tr key={idx} className="border-t hover:bg-slate-50">
+                                              <td className="px-4 py-2 text-slate-700">
+                                                {row.full_name || row.username || 'Unknown'}
+                                              </td>
+                                              <td className="px-4 py-2 text-right text-slate-600">{row.user_contributed}</td>
+                                              <td className="px-4 py-2 text-right">
+                                                {sold > 0 ? (
+                                                  <span className="text-emerald-600">{sold}</span>
+                                                ) : (
+                                                  <span className="text-slate-400">0</span>
+                                                )}
+                                              </td>
+                                              <td className="px-4 py-2 text-right font-medium">
+                                                {sold === 0 ? (
+                                                  <span className="text-slate-400">—</span>
+                                                ) : rowMemberPayout > 0 ? (
+                                                  <span className="text-emerald-600">{formatCurrency(rowMemberPayout)}</span>
+                                                ) : (
+                                                  <span className="text-slate-500">{formatCurrency(rowMemberPayout)}</span>
+                                                )}
+                                              </td>
+                                            </tr>
+                                          )
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )
+                              })
+                            })()}
                           </div>
                         )}
                       </div>
