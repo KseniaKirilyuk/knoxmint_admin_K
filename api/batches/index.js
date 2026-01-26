@@ -66,20 +66,22 @@ export default async function handler(req, res) {
           return res.status(404).json({ error: 'Batch not found' });
         }
 
-        // Get coins with refund counts
+        // Get coins with refund counts - include grade
         const coinsResult = await query(`
           SELECT bc.*, ct.name as coin_type_name, ct.short_code, ct.catalog_id, ct.is_ungraded,
                  COALESCE(refunds.refund_count, 0) as refund_count
           FROM batch_coins bc
           JOIN coin_types ct ON bc.coin_type_id = ct.coin_type_id
           LEFT JOIN (
-            SELECT coin_type_id, batch_id, COUNT(*) as refund_count
+            SELECT coin_type_id, batch_id, grade, COUNT(*) as refund_count
             FROM sales_transactions
             WHERE is_refund = true
-            GROUP BY coin_type_id, batch_id
-          ) refunds ON bc.coin_type_id = refunds.coin_type_id AND bc.batch_id = refunds.batch_id
+            GROUP BY coin_type_id, batch_id, grade
+          ) refunds ON bc.coin_type_id = refunds.coin_type_id AND bc.batch_id = refunds.batch_id 
+            AND ((bc.grade IS NULL AND refunds.grade IS NULL) OR bc.grade = refunds.grade)
           WHERE bc.batch_id = $1
-          ORDER BY ct.catalog_id, ct.is_ungraded, ct.name
+          ORDER BY ct.catalog_id, ct.name, 
+            CASE WHEN bc.grade = '70' THEN 1 WHEN bc.grade = '69' THEN 2 ELSE 3 END
         `, [batchId]);
 
         const contribResult = await query(`
@@ -543,11 +545,11 @@ export default async function handler(req, res) {
             }
 
             // Process contributions
-            const coinTypeTotals = {};
+            const coinTypeTotals = {}; // { coinTypeId: { total: N, grades: { '69': N, '70': N, null: N } } }
             
             for (const contrib of contributions) {
               try {
-                const { memberName, coinCode, coinTypeId, quantity } = contrib;
+                const { memberName, coinCode, coinTypeId, grade, quantity } = contrib;
                 if (!memberName || !quantity || quantity <= 0) continue;
 
                 // Resolve coin type ID
@@ -556,8 +558,11 @@ export default async function handler(req, res) {
                   // Check cache for newly created coin types
                   if (coinTypeCache[coinCode]) {
                     resolvedCoinTypeId = coinTypeCache[coinCode];
-                  } else if (coinCodeMappings[coinCode] && coinCodeMappings[coinCode] !== 'new') {
-                    resolvedCoinTypeId = parseInt(coinCodeMappings[coinCode]);
+                  } else if (coinCodeMappings[coinCode]) {
+                    const mapping = coinCodeMappings[coinCode];
+                    if (mapping.coinTypeId) {
+                      resolvedCoinTypeId = parseInt(mapping.coinTypeId);
+                    }
                   }
                 }
 
@@ -583,17 +588,18 @@ export default async function handler(req, res) {
                   userId = userResult.rows[0].user_id;
                 }
 
-                // Check for existing contribution
+                // Check for existing contribution (grade-agnostic - aggregate by coin type)
                 const existingContrib = await query(
-                  'SELECT id FROM user_contributions WHERE batch_id = $1 AND user_id = $2 AND coin_type_id = $3',
+                  'SELECT id, quantity FROM user_contributions WHERE batch_id = $1 AND user_id = $2 AND coin_type_id = $3',
                   [batchId, userId, resolvedCoinTypeId]
                 );
 
                 if (existingContrib.rows.length > 0) {
-                  // REPLACE existing contribution, don't add
+                  // ADD to existing contribution (aggregating grades for same coin type)
+                  const newQty = parseFloat(existingContrib.rows[0].quantity) + quantity;
                   await query(
                     'UPDATE user_contributions SET quantity = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
-                    [quantity, existingContrib.rows[0].id]
+                    [newQty, existingContrib.rows[0].id]
                   );
                 } else {
                   await query(
@@ -604,35 +610,42 @@ export default async function handler(req, res) {
                 
                 contributionsCreated++;
                 
-                // Track totals for batch_coins
-                if (!coinTypeTotals[resolvedCoinTypeId]) coinTypeTotals[resolvedCoinTypeId] = 0;
-                coinTypeTotals[resolvedCoinTypeId] += quantity;
+                // Track totals for batch_coins by grade
+                if (!coinTypeTotals[resolvedCoinTypeId]) {
+                  coinTypeTotals[resolvedCoinTypeId] = { grades: {} };
+                }
+                const gradeKey = grade || 'null';
+                if (!coinTypeTotals[resolvedCoinTypeId].grades[gradeKey]) {
+                  coinTypeTotals[resolvedCoinTypeId].grades[gradeKey] = 0;
+                }
+                coinTypeTotals[resolvedCoinTypeId].grades[gradeKey] += quantity;
               } catch (err) {
                 errors.push(`Error processing ${contrib.memberName}/${contrib.coinCode}: ${err.message}`);
               }
             }
 
-            // Update batch_coins
-            for (const [ctId, total] of Object.entries(coinTypeTotals)) {
-              const bcExists = await query(
-                'SELECT 1 FROM batch_coins WHERE batch_id = $1 AND coin_type_id = $2',
-                [batchId, ctId]
-              );
-              
-              if (bcExists.rows.length === 0) {
-                await query(
-                  'INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed) VALUES ($1, $2, $3)',
-                  [batchId, ctId, total]
+            // Update batch_coins by grade
+            for (const [ctId, data] of Object.entries(coinTypeTotals)) {
+              for (const [gradeKey, total] of Object.entries(data.grades)) {
+                const gradeValue = gradeKey === 'null' ? null : gradeKey;
+                
+                const bcExists = await query(
+                  'SELECT 1 FROM batch_coins WHERE batch_id = $1 AND coin_type_id = $2 AND (grade = $3 OR (grade IS NULL AND $3 IS NULL))',
+                  [batchId, ctId, gradeValue]
                 );
-              } else {
-                await query(`
-                  UPDATE batch_coins 
-                  SET total_contributed = (
-                    SELECT COALESCE(SUM(quantity), 0) FROM user_contributions 
-                    WHERE batch_id = $1 AND coin_type_id = $2
-                  )
-                  WHERE batch_id = $1 AND coin_type_id = $2
-                `, [batchId, ctId]);
+                
+                if (bcExists.rows.length === 0) {
+                  await query(
+                    'INSERT INTO batch_coins (batch_id, coin_type_id, grade, total_contributed) VALUES ($1, $2, $3, $4)',
+                    [batchId, ctId, gradeValue, total]
+                  );
+                } else {
+                  await query(`
+                    UPDATE batch_coins 
+                    SET total_contributed = total_contributed + $1
+                    WHERE batch_id = $2 AND coin_type_id = $3 AND (grade = $4 OR (grade IS NULL AND $4 IS NULL))
+                  `, [total, batchId, ctId, gradeValue]);
+                }
               }
             }
           } catch (err) {

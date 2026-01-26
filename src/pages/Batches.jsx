@@ -82,6 +82,16 @@ export default function Batches() {
     return best.score > 40 ? best.ct : null
   }
 
+  // Parse grade from coin code like "25SG1-69" → { baseCode: "25SG1", grade: "69" }
+  const parseGradeFromCode = (code) => {
+    if (!code) return { baseCode: code, grade: null }
+    const match = code.match(/^(.+?)[-\s]?(69|70)$/i)
+    if (match) {
+      return { baseCode: match[1].trim(), grade: match[2] }
+    }
+    return { baseCode: code, grade: null }
+  }
+
   useEffect(() => {
     fetchData()
   }, [])
@@ -380,16 +390,17 @@ export default function Batches() {
       }
     })
     
-    // Auto-suggest mappings
+    // Auto-suggest mappings - match on base code (without grade)
     const mappings = {}
     const newTypes = {}
     allCodes.forEach(code => {
-      const match = findBestMatch(code)
+      const { baseCode, grade } = parseGradeFromCode(code)
+      const match = findBestMatch(baseCode)
       if (match) {
-        mappings[code] = match.coin_type_id
+        mappings[code] = { coinTypeId: match.coin_type_id, grade }
       } else {
-        mappings[code] = 'new'
-        newTypes[code] = { name: code, shortCode: code }
+        mappings[code] = { action: 'new', grade }
+        newTypes[code] = { name: baseCode, shortCode: baseCode }
       }
     })
     
@@ -416,12 +427,17 @@ export default function Batches() {
           const mapping = coinCodeMappings[coinCode]
           if (!mapping) return
           
+          const isNew = mapping.action === 'new'
+          const coinTypeId = isNew ? null : mapping.coinTypeId
+          const grade = mapping.grade || null
+          
           members.forEach(({ member, quantity }) => {
             contributions.push({
               memberName: member,
               coinCode,
-              coinTypeId: mapping === 'new' ? null : mapping,
-              newCoinType: mapping === 'new' ? newCoinTypes[coinCode] : null,
+              coinTypeId,
+              grade,
+              newCoinType: isNew ? newCoinTypes[coinCode] : null,
               quantity
             })
           })
@@ -1031,44 +1047,87 @@ export default function Batches() {
                           Edit Prices
                         </button>
                       </div>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        {batchDetails.coins.map(coin => {
-                          const price = parseFloat(coin.cost_per_coin)
-                          const gradingCost = parseFloat(coin.grading_cost_per_coin) || 0
-                          const hasValidPrice = coin.cost_per_coin !== null && coin.cost_per_coin !== undefined && !isNaN(price) && price > 0
-                          const totalCost = (hasValidPrice ? price : 0) + gradingCost
-                          return (
-                            <div key={coin.id} className="p-3 bg-slate-50 rounded-lg">
-                              <div className="flex items-center justify-between">
-                                <p className="font-medium text-sm">{coin.coin_type_name}</p>
-                                {coin.is_ungraded && (
-                                  <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">UG</span>
-                                )}
-                              </div>
-                              <div className="text-xs text-slate-500 space-y-0.5 mt-1">
-                                <p>{coin.total_contributed} contributed • {coin.total_sold || 0} sold</p>
-                                {(coin.refund_count > 0) && (
-                                  <p className="text-red-500">{coin.refund_count} refunded</p>
-                                )}
-                                {(coin.total_contributed - (coin.total_sold || 0)) > 0 && (
-                                  <p className="text-amber-600">{coin.total_contributed - (coin.total_sold || 0)} remaining to sell</p>
-                                )}
-                              </div>
-                              <div className="mt-1 text-sm">
-                                {hasValidPrice ? (
-                                  <div>
-                                    <span className="text-emerald-600 font-medium">${price.toFixed(2)}</span>
-                                    {gradingCost > 0 && (
-                                      <span className="text-slate-500 text-xs ml-1">+ ${gradingCost.toFixed(2)} grading</span>
+                      <div className="space-y-3">
+                        {(() => {
+                          // Group coins by coin_type_id
+                          const grouped = batchDetails.coins.reduce((acc, coin) => {
+                            const key = coin.coin_type_id
+                            if (!acc[key]) {
+                              acc[key] = {
+                                coin_type_id: coin.coin_type_id,
+                                coin_type_name: coin.coin_type_name,
+                                short_code: coin.short_code,
+                                is_ungraded: coin.is_ungraded,
+                                grades: []
+                              }
+                            }
+                            acc[key].grades.push(coin)
+                            return acc
+                          }, {})
+                          
+                          return Object.values(grouped).map(coinType => {
+                            const totalContributed = coinType.grades.reduce((sum, g) => sum + (parseInt(g.total_contributed) || 0), 0)
+                            const totalSold = coinType.grades.reduce((sum, g) => sum + (parseInt(g.total_sold) || 0), 0)
+                            
+                            return (
+                              <div key={coinType.coin_type_id} className="border rounded-lg overflow-hidden">
+                                {/* Coin type header */}
+                                <div className="bg-slate-100 px-4 py-2 flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium text-slate-900">{coinType.coin_type_name}</span>
+                                    {coinType.short_code && (
+                                      <span className="text-xs text-slate-500">({coinType.short_code})</span>
                                     )}
                                   </div>
-                                ) : (
-                                  <span className="text-amber-600">No price set</span>
-                                )}
+                                  <span className="text-sm text-slate-600">
+                                    {totalContributed} total • {totalSold} sold
+                                  </span>
+                                </div>
+                                {/* Grade rows */}
+                                <div className="divide-y">
+                                  {coinType.grades.map(coin => {
+                                    const price = parseFloat(coin.cost_per_coin)
+                                    const gradingCost = parseFloat(coin.grading_cost_per_coin) || 0
+                                    const hasValidPrice = coin.cost_per_coin !== null && coin.cost_per_coin !== undefined && !isNaN(price) && price > 0
+                                    const gradeLabel = coin.grade ? `MS${coin.grade}` : (coin.is_ungraded ? 'Ungraded' : 'No Grade')
+                                    
+                                    return (
+                                      <div key={coin.id} className="px-4 py-2 flex items-center justify-between hover:bg-slate-50">
+                                        <div className="flex items-center gap-3">
+                                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                            coin.grade === '70' ? 'bg-emerald-100 text-emerald-700' :
+                                            coin.grade === '69' ? 'bg-blue-100 text-blue-700' :
+                                            'bg-amber-100 text-amber-700'
+                                          }`}>
+                                            {gradeLabel}
+                                          </span>
+                                          <span className="text-sm text-slate-600">
+                                            {coin.total_contributed} contributed • {coin.total_sold || 0} sold
+                                            {(coin.refund_count > 0) && (
+                                              <span className="text-red-500 ml-1">• {coin.refund_count} refunded</span>
+                                            )}
+                                          </span>
+                                        </div>
+                                        <div className="text-sm">
+                                          {hasValidPrice ? (
+                                            <span>
+                                              <span className="text-emerald-600 font-medium">${price.toFixed(2)}</span>
+                                              {gradingCost > 0 && (
+                                                <span className="text-slate-400 text-xs ml-1">+${gradingCost.toFixed(2)}</span>
+                                              )}
+                                            </span>
+                                          ) : (
+                                            <span className="text-amber-600 text-xs">No price</span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
                               </div>
-                            </div>
-                          )
-                        })}
+                            )
+                          })
+                        })()}
                       </div>
                     </div>
                   )}
@@ -1897,23 +1956,54 @@ export default function Batches() {
                     Map each coin code to an existing coin type or create a new one.
                   </p>
                   <div className="space-y-3">
-                    {Object.keys(coinCodeMappings).map(code => (
+                    {Object.keys(coinCodeMappings).map(code => {
+                      const mapping = coinCodeMappings[code]
+                      const grade = mapping?.grade
+                      const isNew = mapping?.action === 'new'
+                      const selectedValue = isNew ? 'new' : (mapping?.coinTypeId || '')
+                      
+                      return (
                       <div key={code} className="p-4 border rounded-lg">
                         <div className="flex items-start gap-4">
-                          <div className="flex-shrink-0 w-32">
-                            <p className="font-mono font-medium text-slate-900 bg-slate-100 px-2 py-1 rounded">
-                              {code}
-                            </p>
+                          <div className="flex-shrink-0 w-40">
+                            <div className="flex items-center gap-2">
+                              <p className="font-mono font-medium text-slate-900 bg-slate-100 px-2 py-1 rounded">
+                                {code}
+                              </p>
+                              {grade && (
+                                <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                                  grade === '70' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'
+                                }`}>
+                                  MS{grade}
+                                </span>
+                              )}
+                              {!grade && (
+                                <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-xs font-medium">
+                                  UG
+                                </span>
+                              )}
+                            </div>
                           </div>
                           <div className="flex-1 space-y-2">
                             <select
                               className="input"
-                              value={coinCodeMappings[code]}
+                              value={selectedValue}
                               onChange={(e) => {
                                 const val = e.target.value
-                                setCoinCodeMappings(prev => ({ ...prev, [code]: val }))
-                                if (val === 'new' && !newCoinTypes[code]) {
-                                  setNewCoinTypes(prev => ({ ...prev, [code]: { name: code, shortCode: code } }))
+                                if (val === 'new') {
+                                  setCoinCodeMappings(prev => ({ 
+                                    ...prev, 
+                                    [code]: { action: 'new', grade } 
+                                  }))
+                                  if (!newCoinTypes[code]) {
+                                    const { baseCode } = parseGradeFromCode(code)
+                                    setNewCoinTypes(prev => ({ ...prev, [code]: { name: baseCode, shortCode: baseCode } }))
+                                  }
+                                } else {
+                                  setCoinCodeMappings(prev => ({ 
+                                    ...prev, 
+                                    [code]: { coinTypeId: parseInt(val), grade } 
+                                  }))
                                 }
                               }}
                             >
@@ -1925,7 +2015,7 @@ export default function Batches() {
                               ))}
                             </select>
                             
-                            {coinCodeMappings[code] === 'new' && (
+                            {isNew && (
                               <div className="grid grid-cols-2 gap-3 mt-3 p-3 bg-slate-50 rounded-lg">
                                 <div>
                                   <label className="block text-xs font-medium text-slate-600 mb-1">
@@ -1962,6 +2052,8 @@ export default function Batches() {
                           </div>
                         </div>
                       </div>
+                      )
+                    })}
                     ))}
                   </div>
                 </div>
