@@ -238,16 +238,26 @@ export default function Batches() {
     )
   }
 
+  const updateContribCoinType = (contribId, newCoinTypeId) => {
+    setEditContributions(prev =>
+      prev.map(c => c.id === contribId ? { ...c, pendingCoinTypeId: parseInt(newCoinTypeId) } : c)
+    )
+  }
+
   const handleSaveContributions = async () => {
     try {
-      // Find changed contributions
-      const changed = editContributions.filter(c => c.quantity !== c.originalQuantity)
+      // Find contributions with changed quantity or coin type
+      const changed = editContributions.filter(c =>
+        c.quantity !== c.originalQuantity ||
+        (c.pendingCoinTypeId && c.pendingCoinTypeId !== c.coin_type_id)
+      )
       
       for (const contrib of changed) {
-        await api.put('/batches', { 
-          contributionId: contrib.id, 
-          quantity: contrib.quantity 
-        })
+        const payload = { contributionId: contrib.id, quantity: contrib.quantity }
+        if (contrib.pendingCoinTypeId && contrib.pendingCoinTypeId !== contrib.coin_type_id) {
+          payload.newCoinTypeId = contrib.pendingCoinTypeId
+        }
+        await api.put('/batches', payload)
       }
       
       setShowEditContribModal(false)
@@ -1840,14 +1850,28 @@ export default function Batches() {
                       </div>
                       <div className="divide-y">
                         {contribs.map(contrib => (
-                          <div key={contrib.id} className="px-4 py-3 flex items-center gap-4">
-                            <div className="flex-1">
+                          <div key={contrib.id} className="px-4 py-3 flex items-start gap-4">
+                            <div className="flex-1 min-w-0">
                               <p className="font-medium text-slate-900">
                                 {contrib.full_name || contrib.username}
                               </p>
                               <p className="text-xs text-slate-500">@{contrib.username}</p>
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              {/* Coin type selector */}
+                              <select
+                                className="input text-sm w-44"
+                                value={contrib.pendingCoinTypeId ?? contrib.coin_type_id}
+                                onChange={(e) => updateContribCoinType(contrib.id, e.target.value)}
+                                title="Change coin type"
+                              >
+                                {coinTypes.map(ct => (
+                                  <option key={ct.coin_type_id} value={ct.coin_type_id}>
+                                    {ct.name}
+                                  </option>
+                                ))}
+                              </select>
+                              {/* Quantity */}
                               <input
                                 type="number"
                                 min="0"

@@ -42,12 +42,9 @@ export default async function handler(req, res) {
   if (!user) return res.status(401).json({ error: 'Authentication required' });
 
   try {
-    // Extract query params - available to all methods
-    const { batchId } = req.query;
-    const action = req.query.action || req.body?.action;
-    
     // GET requests
     if (req.method === 'GET') {
+      const { action, batchId } = req.query;
 
       // Get coin types
       if (action === 'coinTypes') {
@@ -66,22 +63,12 @@ export default async function handler(req, res) {
           return res.status(404).json({ error: 'Batch not found' });
         }
 
-        // Get coins with refund counts - include grade
         const coinsResult = await query(`
-          SELECT bc.*, ct.name as coin_type_name, ct.short_code, ct.catalog_id, ct.is_ungraded,
-                 COALESCE(refunds.refund_count, 0) as refund_count
+          SELECT bc.*, ct.name as coin_type_name, ct.short_code, ct.catalog_id, ct.is_ungraded
           FROM batch_coins bc
           JOIN coin_types ct ON bc.coin_type_id = ct.coin_type_id
-          LEFT JOIN (
-            SELECT coin_type_id, batch_id, grade, COUNT(*) as refund_count
-            FROM sales_transactions
-            WHERE is_refund = true
-            GROUP BY coin_type_id, batch_id, grade
-          ) refunds ON bc.coin_type_id = refunds.coin_type_id AND bc.batch_id = refunds.batch_id 
-            AND ((bc.grade IS NULL AND refunds.grade IS NULL) OR bc.grade = refunds.grade)
           WHERE bc.batch_id = $1
-          ORDER BY ct.catalog_id, ct.name, 
-            CASE WHEN bc.grade = '70' THEN 1 WHEN bc.grade = '69' THEN 2 ELSE 3 END
+          ORDER BY ct.catalog_id, ct.is_ungraded, ct.name
         `, [batchId]);
 
         const contribResult = await query(`
@@ -93,27 +80,10 @@ export default async function handler(req, res) {
           ORDER BY ct.catalog_id, ct.is_ungraded, u.full_name
         `, [batchId]);
 
-        // Get pending member adjustments for this batch (money owed back)
-        const adjustmentsResult = await query(`
-          SELECT ma.*, u.username, u.full_name, ct.name as coin_type_name,
-                 ra.order_number, ra.alert_type
-          FROM member_adjustments ma
-          JOIN users u ON ma.user_id = u.user_id
-          LEFT JOIN coin_types ct ON ma.coin_type_id = ct.coin_type_id
-          LEFT JOIN refund_alerts ra ON ma.alert_id = ra.alert_id
-          WHERE ma.batch_id = $1 AND ma.status = 'pending'
-          ORDER BY u.full_name, ct.name
-        `, [batchId]);
-
-        // Calculate total pending recovery
-        const totalPendingRecovery = adjustmentsResult.rows.reduce((sum, adj) => sum + Math.abs(parseFloat(adj.amount) || 0), 0);
-
         return res.json({
           batch: batchResult.rows[0],
           coins: coinsResult.rows,
-          contributions: contribResult.rows,
-          pendingAdjustments: adjustmentsResult.rows,
-          totalPendingRecovery
+          contributions: contribResult.rows
         });
       }
 
@@ -197,6 +167,8 @@ export default async function handler(req, res) {
     if (req.method === 'POST') {
       if (user.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
 
+      const action = req.query.action || req.body.action;
+
       // Create new batch
       if (action === 'create') {
         const { batchName, shipDate, grader, notes } = req.body;
@@ -263,13 +235,13 @@ export default async function handler(req, res) {
         return res.json({ success: true });
       }
 
-      // Split grading results - updates batch_coins inventory by grade (NOT contributions)
+      // Split grading results - updates batch_coins inventory only (NOT contributions)
       // Contributions stay as original - payouts are based on original contribution %
       if (action === 'splitGradingResults') {
         await ensureCoinTypeColumns();
         await ensureCostColumn();
         const { batchId, splits } = req.body;
-        // splits = [{ coinTypeId: 1, catalogId: '23XH', ms70: 50, ms69: 30, ungraded: 20 }, ...]
+        // splits = [{ coinTypeId: 1, ungradedCoinTypeId: 2, catalogId: '23XH', graded: 80, ungraded: 20 }, ...]
         
         if (!batchId || !splits || !Array.isArray(splits)) {
           return res.status(400).json({ error: 'Batch ID and splits array required' });
@@ -282,86 +254,112 @@ export default async function handler(req, res) {
         const results = [];
 
         for (const split of splits) {
-          const { coinTypeId, catalogId, ms70 = 0, ms69 = 0, ungraded = 0 } = split;
+          const { coinTypeId, ungradedCoinTypeId: existingUngradedId, catalogId, graded, ungraded } = split;
           
-          const totalCoins = ms70 + ms69 + ungraded;
+          const totalCoins = (graded || 0) + (ungraded || 0);
           if (totalCoins === 0) {
             results.push({ catalogId, error: 'Total is 0' });
             continue;
           }
 
-          if (!coinTypeId) {
-            results.push({ catalogId, error: 'Coin type ID required' });
+          // Get base coin info
+          let gradedCoinTypeId = coinTypeId;
+          let baseName, baseCode, baseCatalogId;
+          let existingCostPerCoin = null;
+          let existingGradingCost = null;
+          
+          if (coinTypeId) {
+            const baseCoinInfo = await query(
+              'SELECT ct.name, ct.short_code, ct.catalog_id, bc.cost_per_coin, bc.grading_cost_per_coin FROM coin_types ct LEFT JOIN batch_coins bc ON ct.coin_type_id = bc.coin_type_id AND bc.batch_id = $2 WHERE ct.coin_type_id = $1', 
+              [coinTypeId, batchId]
+            );
+            
+            if (baseCoinInfo.rows.length === 0) {
+              results.push({ catalogId, coinTypeId, error: 'Coin type not found' });
+              continue;
+            }
+            
+            baseName = baseCoinInfo.rows[0].name.replace(' (Ungraded)', '');
+            baseCode = baseCoinInfo.rows[0].short_code?.replace('-UNGRADED', '') || catalogId || String(coinTypeId);
+            baseCatalogId = baseCoinInfo.rows[0].catalog_id || catalogId || baseCode;
+            existingCostPerCoin = baseCoinInfo.rows[0].cost_per_coin;
+            existingGradingCost = baseCoinInfo.rows[0].grading_cost_per_coin;
+          }
+          
+          if (!baseName) {
+            results.push({ catalogId, error: 'Could not determine coin type info' });
             continue;
           }
 
-          // Get existing cost info for this coin type
-          const existingInfo = await query(
-            `SELECT bc.cost_per_coin, bc.grading_cost_per_coin 
-             FROM batch_coins bc 
-             WHERE bc.batch_id = $1 AND bc.coin_type_id = $2 
-             LIMIT 1`,
-            [batchId, coinTypeId]
-          );
+          // Find or create the ungraded variant coin type
+          let ungradedCoinTypeId = existingUngradedId;
           
-          const existingCostPerCoin = existingInfo.rows[0]?.cost_per_coin || null;
-          const existingGradingCost = existingInfo.rows[0]?.grading_cost_per_coin || null;
-
-          // Helper to upsert batch_coins by grade
-          const upsertGrade = async (grade, quantity) => {
-            if (quantity > 0) {
-              // Check if row exists
-              const existing = await query(
-                `SELECT id FROM batch_coins 
-                 WHERE batch_id = $1 AND coin_type_id = $2 
-                 AND (grade = $3 OR (grade IS NULL AND $3 IS NULL))`,
-                [batchId, coinTypeId, grade]
+          if (!ungradedCoinTypeId && ungraded > 0) {
+            const ungradedCoin = await query(
+              `SELECT coin_type_id FROM coin_types 
+               WHERE (catalog_id = $1 AND is_ungraded = true) 
+                  OR (short_code = $2 AND is_ungraded = true) LIMIT 1`,
+              [baseCatalogId, `${baseCode}-UNGRADED`]
+            );
+            
+            if (ungradedCoin.rows.length === 0) {
+              // Create ungraded variant
+              const ungradedName = `${baseName} (Ungraded)`;
+              
+              const existingName = await query(
+                'SELECT coin_type_id FROM coin_types WHERE name = $1',
+                [ungradedName]
               );
               
-              if (existing.rows.length > 0) {
+              if (existingName.rows.length > 0) {
+                ungradedCoinTypeId = existingName.rows[0].coin_type_id;
                 await query(
-                  `UPDATE batch_coins SET total_contributed = $1, updated_at = CURRENT_TIMESTAMP
-                   WHERE batch_id = $2 AND coin_type_id = $3 
-                   AND (grade = $4 OR (grade IS NULL AND $4 IS NULL))`,
-                  [quantity, batchId, coinTypeId, grade]
+                  'UPDATE coin_types SET is_ungraded = true, catalog_id = $1 WHERE coin_type_id = $2',
+                  [baseCatalogId, ungradedCoinTypeId]
                 );
               } else {
-                await query(
-                  `INSERT INTO batch_coins (batch_id, coin_type_id, grade, total_contributed, cost_per_coin, grading_cost_per_coin)
-                   VALUES ($1, $2, $3, $4, $5, $6)`,
-                  [batchId, coinTypeId, grade, quantity, existingCostPerCoin, grade ? existingGradingCost : 0]
+                const newUngraded = await query(
+                  `INSERT INTO coin_types (name, short_code, catalog_id, is_ungraded, keywords)
+                   VALUES ($1, $2, $3, true, $4)
+                   RETURNING coin_type_id`,
+                  [ungradedName, `${baseCode}-UNGRADED`, baseCatalogId, [baseName, baseCatalogId]]
                 );
+                ungradedCoinTypeId = newUngraded.rows[0].coin_type_id;
               }
             } else {
-              // Set to 0 or delete if quantity is 0
-              await query(
-                `UPDATE batch_coins SET total_contributed = 0, updated_at = CURRENT_TIMESTAMP
-                 WHERE batch_id = $1 AND coin_type_id = $2 
-                 AND (grade = $3 OR (grade IS NULL AND $3 IS NULL))`,
-                [batchId, coinTypeId, grade]
-              );
+              ungradedCoinTypeId = ungradedCoin.rows[0].coin_type_id;
             }
-          };
+          }
 
-          // Update/create rows for each grade
-          await upsertGrade('70', ms70);
-          await upsertGrade('69', ms69);
-          await upsertGrade(null, ungraded); // null grade = ungraded
+          // Update batch_coins for graded (inventory tracking only)
+          await query(`
+            INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed, cost_per_coin, grading_cost_per_coin)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (batch_id, coin_type_id)
+            DO UPDATE SET total_contributed = $3
+          `, [batchId, gradedCoinTypeId, graded, existingCostPerCoin, existingGradingCost]);
 
-          // Clean up any old rows without grade (from before this update)
-          // that aren't the ungraded row we just handled
-          await query(
-            `DELETE FROM batch_coins 
-             WHERE batch_id = $1 AND coin_type_id = $2 
-             AND grade IS NULL AND total_contributed = 0`,
-            [batchId, coinTypeId]
-          );
+          // Update batch_coins for ungraded (inventory tracking only)
+          if (ungradedCoinTypeId && ungraded > 0) {
+            // Copy the coin cost from graded, grading cost can be set separately
+            await query(`
+              INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed, cost_per_coin)
+              VALUES ($1, $2, $3, $4)
+              ON CONFLICT (batch_id, coin_type_id)
+              DO UPDATE SET total_contributed = $3
+            `, [batchId, ungradedCoinTypeId, ungraded, existingCostPerCoin]);
+          } else if (ungradedCoinTypeId) {
+            // Set ungraded to 0
+            await query(`
+              UPDATE batch_coins SET total_contributed = 0 WHERE batch_id = $1 AND coin_type_id = $2
+            `, [batchId, ungradedCoinTypeId]);
+          }
 
           results.push({ 
             catalogId,
-            coinTypeId,
-            ms70,
-            ms69,
+            coinTypeId: gradedCoinTypeId, 
+            ungradedCoinTypeId, 
+            graded,
             ungraded
           });
         }
@@ -519,11 +517,11 @@ export default async function handler(req, res) {
             }
 
             // Process contributions
-            const coinTypeTotals = {}; // { coinTypeId: { total: N, grades: { '69': N, '70': N, null: N } } }
+            const coinTypeTotals = {};
             
             for (const contrib of contributions) {
               try {
-                const { memberName, coinCode, coinTypeId, grade, quantity } = contrib;
+                const { memberName, coinCode, coinTypeId, quantity } = contrib;
                 if (!memberName || !quantity || quantity <= 0) continue;
 
                 // Resolve coin type ID
@@ -532,11 +530,8 @@ export default async function handler(req, res) {
                   // Check cache for newly created coin types
                   if (coinTypeCache[coinCode]) {
                     resolvedCoinTypeId = coinTypeCache[coinCode];
-                  } else if (coinCodeMappings[coinCode]) {
-                    const mapping = coinCodeMappings[coinCode];
-                    if (mapping.coinTypeId) {
-                      resolvedCoinTypeId = parseInt(mapping.coinTypeId);
-                    }
+                  } else if (coinCodeMappings[coinCode] && coinCodeMappings[coinCode] !== 'new') {
+                    resolvedCoinTypeId = parseInt(coinCodeMappings[coinCode]);
                   }
                 }
 
@@ -562,18 +557,17 @@ export default async function handler(req, res) {
                   userId = userResult.rows[0].user_id;
                 }
 
-                // Check for existing contribution (grade-agnostic - aggregate by coin type)
+                // Check for existing contribution
                 const existingContrib = await query(
-                  'SELECT id, quantity FROM user_contributions WHERE batch_id = $1 AND user_id = $2 AND coin_type_id = $3',
+                  'SELECT id FROM user_contributions WHERE batch_id = $1 AND user_id = $2 AND coin_type_id = $3',
                   [batchId, userId, resolvedCoinTypeId]
                 );
 
                 if (existingContrib.rows.length > 0) {
-                  // ADD to existing contribution (aggregating grades for same coin type)
-                  const newQty = parseFloat(existingContrib.rows[0].quantity) + quantity;
+                  // REPLACE existing contribution, don't add
                   await query(
                     'UPDATE user_contributions SET quantity = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
-                    [newQty, existingContrib.rows[0].id]
+                    [quantity, existingContrib.rows[0].id]
                   );
                 } else {
                   await query(
@@ -584,42 +578,35 @@ export default async function handler(req, res) {
                 
                 contributionsCreated++;
                 
-                // Track totals for batch_coins by grade
-                if (!coinTypeTotals[resolvedCoinTypeId]) {
-                  coinTypeTotals[resolvedCoinTypeId] = { grades: {} };
-                }
-                const gradeKey = grade || 'null';
-                if (!coinTypeTotals[resolvedCoinTypeId].grades[gradeKey]) {
-                  coinTypeTotals[resolvedCoinTypeId].grades[gradeKey] = 0;
-                }
-                coinTypeTotals[resolvedCoinTypeId].grades[gradeKey] += quantity;
+                // Track totals for batch_coins
+                if (!coinTypeTotals[resolvedCoinTypeId]) coinTypeTotals[resolvedCoinTypeId] = 0;
+                coinTypeTotals[resolvedCoinTypeId] += quantity;
               } catch (err) {
                 errors.push(`Error processing ${contrib.memberName}/${contrib.coinCode}: ${err.message}`);
               }
             }
 
-            // Update batch_coins by grade
-            for (const [ctId, data] of Object.entries(coinTypeTotals)) {
-              for (const [gradeKey, total] of Object.entries(data.grades)) {
-                const gradeValue = gradeKey === 'null' ? null : gradeKey;
-                
-                const bcExists = await query(
-                  'SELECT 1 FROM batch_coins WHERE batch_id = $1 AND coin_type_id = $2 AND (grade = $3 OR (grade IS NULL AND $3 IS NULL))',
-                  [batchId, ctId, gradeValue]
+            // Update batch_coins
+            for (const [ctId, total] of Object.entries(coinTypeTotals)) {
+              const bcExists = await query(
+                'SELECT 1 FROM batch_coins WHERE batch_id = $1 AND coin_type_id = $2',
+                [batchId, ctId]
+              );
+              
+              if (bcExists.rows.length === 0) {
+                await query(
+                  'INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed) VALUES ($1, $2, $3)',
+                  [batchId, ctId, total]
                 );
-                
-                if (bcExists.rows.length === 0) {
-                  await query(
-                    'INSERT INTO batch_coins (batch_id, coin_type_id, grade, total_contributed) VALUES ($1, $2, $3, $4)',
-                    [batchId, ctId, gradeValue, total]
-                  );
-                } else {
-                  await query(`
-                    UPDATE batch_coins 
-                    SET total_contributed = total_contributed + $1
-                    WHERE batch_id = $2 AND coin_type_id = $3 AND (grade = $4 OR (grade IS NULL AND $4 IS NULL))
-                  `, [total, batchId, ctId, gradeValue]);
-                }
+              } else {
+                await query(`
+                  UPDATE batch_coins 
+                  SET total_contributed = (
+                    SELECT COALESCE(SUM(quantity), 0) FROM user_contributions 
+                    WHERE batch_id = $1 AND coin_type_id = $2
+                  )
+                  WHERE batch_id = $1 AND coin_type_id = $2
+                `, [batchId, ctId]);
               }
             }
           } catch (err) {
@@ -989,70 +976,82 @@ export default async function handler(req, res) {
     if (req.method === 'PUT') {
       if (user.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
 
+      const { batchId } = req.query;
       const { batchName, shipDate, grader, status, notes, coinPrices, contributionId, quantity } = req.body;
-
-      // Update member adjustment amount or status
-      if (action === 'updateAdjustment') {
-        const { adjustmentId, amount, adjustmentStatus } = req.body;
-        
-        if (!adjustmentId) {
-          return res.status(400).json({ error: 'adjustmentId required' });
-        }
-        
-        const updates = [];
-        const params = [];
-        let paramIndex = 1;
-        
-        if (amount !== undefined) {
-          updates.push(`amount = $${paramIndex}`);
-          params.push(amount);
-          paramIndex++;
-        }
-        
-        if (adjustmentStatus) {
-          updates.push(`status = $${paramIndex}`);
-          params.push(adjustmentStatus);
-          paramIndex++;
-          
-          if (adjustmentStatus === 'waived' || adjustmentStatus === 'applied') {
-            updates.push(`applied_at = CURRENT_TIMESTAMP`);
-          }
-        }
-        
-        if (updates.length === 0) {
-          return res.status(400).json({ error: 'No updates provided' });
-        }
-        
-        params.push(adjustmentId);
-        await query(
-          `UPDATE member_adjustments SET ${updates.join(', ')} WHERE adjustment_id = $${paramIndex}`,
-          params
-        );
-        
-        return res.json({ success: true });
-      }
 
       // Update contribution (check this first since it doesn't need batchId in query)
       if (contributionId !== undefined) {
+        const { newCoinTypeId } = req.body;
+
+        // Get the current contribution so we know which batch/coin to recalculate
+        const currentContrib = await query(
+          'SELECT batch_id, coin_type_id FROM user_contributions WHERE id = $1',
+          [contributionId]
+        );
+        if (currentContrib.rows.length === 0) {
+          return res.status(404).json({ error: 'Contribution not found' });
+        }
+        const { batch_id: contribBatchId, coin_type_id: oldCoinTypeId } = currentContrib.rows[0];
+
         if (quantity === 0) {
           // Delete if quantity is 0
           await query('DELETE FROM user_contributions WHERE id = $1', [contributionId]);
+        } else if (newCoinTypeId && parseInt(newCoinTypeId) !== parseInt(oldCoinTypeId)) {
+          // Changing coin type — check for existing contribution with same user+batch+newCoinType
+          const existingTarget = await query(
+            `SELECT id, quantity FROM user_contributions
+             WHERE batch_id = $1 AND user_id = (SELECT user_id FROM user_contributions WHERE id = $2)
+               AND coin_type_id = $3 AND id != $2`,
+            [contribBatchId, contributionId, newCoinTypeId]
+          );
+
+          if (existingTarget.rows.length > 0) {
+            // Merge into existing row
+            await query(
+              'UPDATE user_contributions SET quantity = quantity + $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+              [quantity ?? currentContrib.rows[0]?.quantity, existingTarget.rows[0].id]
+            );
+            await query('DELETE FROM user_contributions WHERE id = $1', [contributionId]);
+          } else {
+            // Just update coin_type_id (and optionally quantity)
+            await query(
+              `UPDATE user_contributions 
+               SET coin_type_id = $1, quantity = COALESCE($2, quantity), updated_at = CURRENT_TIMESTAMP
+               WHERE id = $3`,
+              [newCoinTypeId, quantity ?? null, contributionId]
+            );
+          }
+
+          // Ensure batch_coins row exists for new coin type
+          await query(`
+            INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed)
+            VALUES ($1, $2, 0)
+            ON CONFLICT (batch_id, coin_type_id) DO NOTHING
+          `, [contribBatchId, newCoinTypeId]);
+
         } else {
+          // Just update quantity
           await query(
             'UPDATE user_contributions SET quantity = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
             [contributionId, quantity]
           );
         }
 
-        // Recalculate batch_coins totals
-        await query(`
-          UPDATE batch_coins bc
-          SET total_contributed = (
-            SELECT COALESCE(SUM(uc.quantity), 0) 
-            FROM user_contributions uc 
-            WHERE uc.batch_id = bc.batch_id AND uc.coin_type_id = bc.coin_type_id
-          )
-        `);
+        // Recalculate batch_coins totals for affected coin types
+        const coinTypesToRecalc = [oldCoinTypeId];
+        if (newCoinTypeId) coinTypesToRecalc.push(newCoinTypeId);
+
+        for (const ctId of coinTypesToRecalc) {
+          await query(`
+            UPDATE batch_coins
+            SET total_contributed = (
+              SELECT COALESCE(SUM(uc.quantity), 0)
+              FROM user_contributions uc
+              WHERE uc.batch_id = $1 AND uc.coin_type_id = $2
+            )
+            WHERE batch_id = $1 AND coin_type_id = $2
+          `, [contribBatchId, ctId]);
+        }
 
         return res.json({ success: true });
       }
@@ -1074,28 +1073,13 @@ export default async function handler(req, res) {
       }
 
       // Update coin prices in batch (cost_per_coin and grading_cost_per_coin)
-      // Keys can be either "coinTypeId" (old format) or "coinTypeId-grade" (new format)
       if (batchId && (coinPrices || req.body.gradingCosts)) {
         await ensureCostColumn();
         const gradingCosts = req.body.gradingCosts || {};
         
-        // Helper to parse key into coinTypeId and grade
-        const parseKey = (key) => {
-          if (key.includes('-')) {
-            const parts = key.split('-');
-            const coinTypeId = parts[0];
-            const grade = parts[1] === 'null' ? null : parts[1];
-            return { coinTypeId, grade };
-          }
-          // Old format - just coinTypeId, update all grades
-          return { coinTypeId: key, grade: undefined };
-        };
-        
         // Update cost per coin
         if (coinPrices) {
-          for (const [key, price] of Object.entries(coinPrices)) {
-            const { coinTypeId, grade } = parseKey(key);
-            
+          for (const [coinTypeId, price] of Object.entries(coinPrices)) {
             // Only save if we have a valid positive price, otherwise null
             let priceValue = null;
             if (price !== '' && price !== null && price !== undefined) {
@@ -1105,31 +1089,17 @@ export default async function handler(req, res) {
                 priceValue = parsed;
               }
             }
-            
-            if (grade === undefined) {
-              // Old format - update all rows for this coin type
-              await query(`
-                UPDATE batch_coins 
-                SET cost_per_coin = $1, updated_at = CURRENT_TIMESTAMP
-                WHERE batch_id = $2 AND coin_type_id = $3
-              `, [priceValue, batchId, coinTypeId]);
-            } else {
-              // New format - update specific grade row
-              await query(`
-                UPDATE batch_coins 
-                SET cost_per_coin = $1, updated_at = CURRENT_TIMESTAMP
-                WHERE batch_id = $2 AND coin_type_id = $3
-                  AND (grade = $4 OR (grade IS NULL AND $4 IS NULL))
-              `, [priceValue, batchId, coinTypeId, grade]);
-            }
+            await query(`
+              UPDATE batch_coins 
+              SET cost_per_coin = $1, updated_at = CURRENT_TIMESTAMP
+              WHERE batch_id = $2 AND coin_type_id = $3
+            `, [priceValue, batchId, coinTypeId]);
           }
         }
         
         // Update grading cost per coin
         if (gradingCosts) {
-          for (const [key, cost] of Object.entries(gradingCosts)) {
-            const { coinTypeId, grade } = parseKey(key);
-            
+          for (const [coinTypeId, cost] of Object.entries(gradingCosts)) {
             let costValue = 0;
             if (cost !== '' && cost !== null && cost !== undefined) {
               const parsed = parseFloat(cost);
@@ -1137,23 +1107,11 @@ export default async function handler(req, res) {
                 costValue = parsed;
               }
             }
-            
-            if (grade === undefined) {
-              // Old format - update all rows for this coin type
-              await query(`
-                UPDATE batch_coins 
-                SET grading_cost_per_coin = $1, updated_at = CURRENT_TIMESTAMP
-                WHERE batch_id = $2 AND coin_type_id = $3
-              `, [costValue, batchId, coinTypeId]);
-            } else {
-              // New format - update specific grade row
-              await query(`
-                UPDATE batch_coins 
-                SET grading_cost_per_coin = $1, updated_at = CURRENT_TIMESTAMP
-                WHERE batch_id = $2 AND coin_type_id = $3
-                  AND (grade = $4 OR (grade IS NULL AND $4 IS NULL))
-              `, [costValue, batchId, coinTypeId, grade]);
-            }
+            await query(`
+              UPDATE batch_coins 
+              SET grading_cost_per_coin = $1, updated_at = CURRENT_TIMESTAMP
+              WHERE batch_id = $2 AND coin_type_id = $3
+            `, [costValue, batchId, coinTypeId]);
           }
         }
         
