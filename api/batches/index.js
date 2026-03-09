@@ -108,10 +108,10 @@ export default async function handler(req, res) {
         ORDER BY b.ship_date DESC NULLS LAST, b.created_at DESC
       `);
       return res.json(result.rows);
-    }
+    } // end GET
 
-    // Get member adjustments (for payout calculations)
-    if (action === 'memberAdjustments') {
+    // Get member adjustments (for payout calculations) - NOTE: this must stay inside GET check
+    if (req.method === 'GET' && req.query.action === 'memberAdjustments') {
       const { userId, status = 'pending' } = req.query;
       
       let sql = `
@@ -146,7 +146,6 @@ export default async function handler(req, res) {
       
       const result = await query(sql, params);
       
-      // Also get summary by user
       const summaryResult = await query(`
         SELECT 
           user_id,
