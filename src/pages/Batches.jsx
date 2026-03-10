@@ -351,9 +351,16 @@ export default function Batches() {
         // Coin codes are all other columns after member column
         const coinCodes = headers.slice(memberCol + 1).filter(h => h && h.toString().trim())
         
-        // Parse member contributions
+        // Find prices header row so we stop contributions parsing before it
+        let pricesStartRow = jsonData.length
+        for (let i = 1; i < jsonData.length; i++) {
+          const rowStr = (jsonData[i] || []).map(c => String(c || '').trim().toLowerCase()).join('|')
+          if (rowStr.includes('coin cost')) { pricesStartRow = i; break }
+        }
+
+        // Parse member contributions (stop before prices section)
         const contributions = {}
-        jsonData.slice(1).forEach(row => {
+        jsonData.slice(1, pricesStartRow).forEach(row => {
           const memberName = row[memberCol]
           if (!memberName) return
           
@@ -402,7 +409,7 @@ export default function Batches() {
           coinCodes,
           contributions,
           prices,
-          totalMembers: new Set(jsonData.slice(1).map(r => r[memberCol]).filter(Boolean)).size
+          totalMembers: new Set(jsonData.slice(1, pricesStartRow).map(r => r[memberCol]).filter(Boolean)).size
         }
       })
       
