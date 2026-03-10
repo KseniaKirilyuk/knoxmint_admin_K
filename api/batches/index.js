@@ -544,9 +544,8 @@ export default async function handler(req, res) {
               try {
                 const { memberName, coinCode, coinTypeId, quantity } = contrib;
                 if (!memberName || !quantity || quantity <= 0) continue;
-                // Skip if memberName looks like a coin code / price row leaked through
-                if (!isNaN(parseFloat(memberName)) && isFinite(memberName)) continue;
-                if (/^\d{2,}[A-Z]/.test(String(memberName)) && coinTypeId) continue; // coin code as member name
+                // Skip if memberName is itself a coin code (prices row leaking through frontend)
+                if (coinCodeMappings && coinCodeMappings[String(memberName)]) continue;
 
                 // Resolve coin type ID
                 let resolvedCoinTypeId = coinTypeId;
