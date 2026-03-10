@@ -269,7 +269,7 @@ export default async function handler(req, res) {
           
           if (coinTypeId) {
             const baseCoinInfo = await query(
-              'SELECT ct.name, ct.short_code, ct.catalog_id, bc.cost_per_coin, bc.grading_cost_per_coin FROM coin_types ct LEFT JOIN batch_coins bc ON ct.coin_type_id = bc.coin_type_id AND bc.batch_id = $2 WHERE ct.coin_type_id = $1', 
+              'SELECT ct.name, ct.short_code, ct.catalog_id, bc.cost_per_coin, bc.grading_cost_per_coin, bc.price_data FROM coin_types ct LEFT JOIN batch_coins bc ON ct.coin_type_id = bc.coin_type_id AND bc.batch_id = $2 WHERE ct.coin_type_id = $1',
               [coinTypeId, batchId]
             );
             
@@ -283,6 +283,11 @@ export default async function handler(req, res) {
             baseCatalogId = baseCoinInfo.rows[0].catalog_id || catalogId || baseCode;
             existingCostPerCoin = baseCoinInfo.rows[0].cost_per_coin;
             existingGradingCost = baseCoinInfo.rows[0].grading_cost_per_coin;
+            // Use grade-specific costs from price_data if available
+            const priceData = baseCoinInfo.rows[0].price_data || {};
+            const grading70Cost  = priceData.grading70 != null ? priceData.grading70 : existingGradingCost;
+            const grading69Cost  = priceData.grading69 != null ? priceData.grading69 : existingGradingCost;
+            const ungradedGradingCost = priceData.ungraded != null ? priceData.ungraded : 0;
           }
           
           if (!baseName) {
@@ -330,23 +335,27 @@ export default async function handler(req, res) {
             }
           }
 
-          // Update batch_coins for graded (inventory tracking only)
+          // Update batch_coins for graded — use grade-specific grading cost (grading70)
           await query(`
             INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed, cost_per_coin, grading_cost_per_coin)
             VALUES ($1, $2, $3, $4, $5)
             ON CONFLICT (batch_id, coin_type_id)
-            DO UPDATE SET total_contributed = $3
-          `, [batchId, gradedCoinTypeId, graded, existingCostPerCoin, existingGradingCost]);
+            DO UPDATE SET total_contributed = $3,
+              cost_per_coin = COALESCE($4, batch_coins.cost_per_coin),
+              grading_cost_per_coin = COALESCE($5, batch_coins.grading_cost_per_coin)
+          `, [batchId, gradedCoinTypeId, graded, existingCostPerCoin, grading70Cost]);
 
           // Update batch_coins for ungraded (inventory tracking only)
           if (ungradedCoinTypeId && ungraded > 0) {
-            // Copy the coin cost from graded, grading cost can be set separately
+            // Use ungraded grading cost from price_data
             await query(`
-              INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed, cost_per_coin)
-              VALUES ($1, $2, $3, $4)
+              INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed, cost_per_coin, grading_cost_per_coin)
+              VALUES ($1, $2, $3, $4, $5)
               ON CONFLICT (batch_id, coin_type_id)
-              DO UPDATE SET total_contributed = $3
-            `, [batchId, ungradedCoinTypeId, ungraded, existingCostPerCoin]);
+              DO UPDATE SET total_contributed = $3,
+                cost_per_coin = COALESCE($4, batch_coins.cost_per_coin),
+                grading_cost_per_coin = COALESCE($5, batch_coins.grading_cost_per_coin)
+            `, [batchId, ungradedCoinTypeId, ungraded, existingCostPerCoin, ungradedGradingCost]);
           } else if (ungradedCoinTypeId) {
             // Set ungraded to 0
             await query(`
@@ -495,7 +504,20 @@ export default async function handler(req, res) {
         // Now process each batch
         for (const batchData of batches) {
           try {
-            const { batchName, contributions } = batchData;
+            const { batchName, contributions, prices = {} } = batchData;
+
+            // Build resolvedPrices: { coinTypeId: { coinCost, grading70, grading69, ungraded } }
+            const resolvedPrices = {};
+            for (const [code, p] of Object.entries(prices)) {
+              let ctId = null;
+              if (coinTypeCache[code]) {
+                ctId = String(coinTypeCache[code]);
+              } else {
+                const m = coinCodeMappings?.[code];
+                if (m && m !== 'new') ctId = String(m.coinTypeId || m);
+              }
+              if (ctId) resolvedPrices[ctId] = p;
+            }
             
             // Check if batch already exists
             const existingBatch = await query(
@@ -585,27 +607,41 @@ export default async function handler(req, res) {
               }
             }
 
-            // Update batch_coins
+            // Update batch_coins with totals + prices from uploaded file
             for (const [ctId, total] of Object.entries(coinTypeTotals)) {
+              const p = resolvedPrices[String(ctId)] || {};
+              const coinCost    = p.coinCost  != null ? p.coinCost  : null;
+              const gradingCost = p.grading70 != null ? p.grading70 : null;
+              // Store all grade-specific costs as JSON so splitGradingResults can use them
+              const priceData   = (p.coinCost != null || p.grading70 != null || p.grading69 != null || p.ungraded != null)
+                ? JSON.stringify(p) : null;
+
+              // Ensure price_data column exists
+              await query(`ALTER TABLE batch_coins ADD COLUMN IF NOT EXISTS price_data JSONB`).catch(() => {});
+
               const bcExists = await query(
                 'SELECT 1 FROM batch_coins WHERE batch_id = $1 AND coin_type_id = $2',
                 [batchId, ctId]
               );
-              
+
               if (bcExists.rows.length === 0) {
                 await query(
-                  'INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed) VALUES ($1, $2, $3)',
-                  [batchId, ctId, total]
+                  `INSERT INTO batch_coins (batch_id, coin_type_id, total_contributed, cost_per_coin, grading_cost_per_coin, price_data)
+                   VALUES ($1, $2, $3, $4, $5, $6)`,
+                  [batchId, ctId, total, coinCost, gradingCost, priceData]
                 );
               } else {
                 await query(`
-                  UPDATE batch_coins 
+                  UPDATE batch_coins
                   SET total_contributed = (
-                    SELECT COALESCE(SUM(quantity), 0) FROM user_contributions 
+                    SELECT COALESCE(SUM(quantity), 0) FROM user_contributions
                     WHERE batch_id = $1 AND coin_type_id = $2
-                  )
+                  ),
+                  cost_per_coin = COALESCE($3, cost_per_coin),
+                  grading_cost_per_coin = COALESCE($4, grading_cost_per_coin),
+                  price_data = COALESCE($5::jsonb, price_data)
                   WHERE batch_id = $1 AND coin_type_id = $2
-                `, [batchId, ctId]);
+                `, [batchId, ctId, coinCost, gradingCost, priceData]);
               }
             }
           } catch (err) {

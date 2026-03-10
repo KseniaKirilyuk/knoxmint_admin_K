@@ -366,9 +366,42 @@ export default function Batches() {
           })
         })
         
+        // Parse prices section (rows below a blank row with 'Coin Cost' header)
+        const prices = {} // { coinCode: { coinCost, grading70, grading69, ungraded } }
+        const parseDollarVal = v => {
+          if (v === '' || v == null) return null
+          const n = parseFloat(String(v).replace(/[$,]/g, ''))
+          return isNaN(n) ? null : n
+        }
+        let pricesHeaderRow = -1
+        for (let i = 1; i < jsonData.length; i++) {
+          const row = jsonData[i] || []
+          const rowStr = row.map(c => String(c || '').trim().toLowerCase()).join('|')
+          if (rowStr.includes('coin cost')) { pricesHeaderRow = i; break }
+        }
+        if (pricesHeaderRow !== -1) {
+          const ph = (jsonData[pricesHeaderRow] || []).map(c => String(c || '').trim().toLowerCase())
+          const coinCostIdx  = ph.findIndex(h => h.includes('coin cost'))
+          const grading70Idx = ph.findIndex(h => h.includes('grading') && h.includes('70'))
+          const grading69Idx = ph.findIndex(h => h.includes('grading') && h.includes('69'))
+          const ungradedIdx  = ph.findIndex(h => h === 'ungraded')
+          for (let i = pricesHeaderRow + 1; i < jsonData.length; i++) {
+            const row = jsonData[i] || []
+            const coinCode = String(row[0] || '').trim()
+            if (!coinCode) continue
+            prices[coinCode] = {
+              coinCost:  parseDollarVal(coinCostIdx  !== -1 ? row[coinCostIdx]  : null),
+              grading70: parseDollarVal(grading70Idx !== -1 ? row[grading70Idx] : null),
+              grading69: parseDollarVal(grading69Idx !== -1 ? row[grading69Idx] : null),
+              ungraded:  parseDollarVal(ungradedIdx  !== -1 ? row[ungradedIdx]  : null),
+            }
+          }
+        }
+
         parsedData[sheetName] = {
           coinCodes,
           contributions,
+          prices,
           totalMembers: new Set(jsonData.slice(1).map(r => r[memberCol]).filter(Boolean)).size
         }
       })
@@ -455,7 +488,8 @@ export default function Batches() {
         
         batchesToImport.push({
           batchName: sheetName,
-          contributions
+          contributions,
+          prices: sheet.prices || {}
         })
       })
       
