@@ -351,14 +351,14 @@ export default function Batches() {
         // Coin codes are all other columns after member column
         const coinCodes = headers.slice(memberCol + 1).filter(h => h && h.toString().trim())
         
-        // Find prices header row so we stop contributions parsing before it
+        // Find where prices section starts (row with 'Coin Cost' header)
         let pricesStartRow = jsonData.length
         for (let i = 1; i < jsonData.length; i++) {
           const rowStr = (jsonData[i] || []).map(c => String(c || '').trim().toLowerCase()).join('|')
           if (rowStr.includes('coin cost')) { pricesStartRow = i; break }
         }
 
-        // Parse member contributions (stop before prices section)
+        // Parse member contributions — stop before prices section
         const contributions = {}
         jsonData.slice(1, pricesStartRow).forEach(row => {
           const memberName = row[memberCol]
@@ -373,26 +373,16 @@ export default function Batches() {
           })
         })
         
-        // Parse prices section (rows below a blank row with 'Coin Cost' header)
-        const prices = {} // { coinCode: { coinCost, grading70, grading69, ungraded } }
-        const parseDollarVal = v => {
-          if (v === '' || v == null) return null
-          const n = parseFloat(String(v).replace(/[$,]/g, ''))
-          return isNaN(n) ? null : n
-        }
-        let pricesHeaderRow = -1
-        for (let i = 1; i < jsonData.length; i++) {
-          const row = jsonData[i] || []
-          const rowStr = row.map(c => String(c || '').trim().toLowerCase()).join('|')
-          if (rowStr.includes('coin cost')) { pricesHeaderRow = i; break }
-        }
-        if (pricesHeaderRow !== -1) {
-          const ph = (jsonData[pricesHeaderRow] || []).map(c => String(c || '').trim().toLowerCase())
+        // Parse prices section
+        const prices = {}
+        if (pricesStartRow < jsonData.length) {
+          const ph = (jsonData[pricesStartRow] || []).map(c => String(c || '').trim().toLowerCase())
           const coinCostIdx  = ph.findIndex(h => h.includes('coin cost'))
           const grading70Idx = ph.findIndex(h => h.includes('grading') && h.includes('70'))
           const grading69Idx = ph.findIndex(h => h.includes('grading') && h.includes('69'))
           const ungradedIdx  = ph.findIndex(h => h === 'ungraded')
-          for (let i = pricesHeaderRow + 1; i < jsonData.length; i++) {
+          const parseDollarVal = v => { if (v == null || v === '') return null; const n = parseFloat(String(v).replace(/[$,]/g,'')); return isNaN(n) ? null : n }
+          for (let i = pricesStartRow + 1; i < jsonData.length; i++) {
             const row = jsonData[i] || []
             const coinCode = String(row[0] || '').trim()
             if (!coinCode) continue
@@ -404,11 +394,10 @@ export default function Batches() {
             }
           }
         }
-
+        
         parsedData[sheetName] = {
           coinCodes,
           contributions,
-          prices,
           totalMembers: new Set(jsonData.slice(1, pricesStartRow).map(r => r[memberCol]).filter(Boolean)).size
         }
       })

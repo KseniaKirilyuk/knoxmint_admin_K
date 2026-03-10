@@ -544,8 +544,11 @@ export default async function handler(req, res) {
               try {
                 const { memberName, coinCode, coinTypeId, quantity } = contrib;
                 if (!memberName || !quantity || quantity <= 0) continue;
-                // Skip if memberName is itself a coin code (prices row leaking through frontend)
+                // Skip if memberName is itself a coin code (prices row leaking through)
                 if (coinCodeMappings && coinCodeMappings[String(memberName)]) continue;
+                // Skip if quantity is a decimal price value (e.g. 30.67, 2180.95) not a coin count
+                const intQty = Math.round(Number(quantity));
+                if (Math.abs(Number(quantity) - intQty) > 0.01) continue;
 
                 // Resolve coin type ID
                 let resolvedCoinTypeId = coinTypeId;
