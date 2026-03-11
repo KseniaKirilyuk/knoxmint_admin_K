@@ -959,7 +959,7 @@ export default function Batches() {
         <div className="flex items-center gap-3">
           <label className="btn btn-secondary gap-2 cursor-pointer">
             <UploadIcon className="w-4 h-4" />
-            Import Batches
+            Import Batches ✓
             <input
               type="file"
               accept=".xlsx,.xls"
@@ -1951,7 +1951,7 @@ export default function Batches() {
             {/* Header */}
             <div className="px-6 py-4 border-b flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold">Import Batches</h2>
+                <h2 className="text-lg font-semibold">Import Batches ✓</h2>
                 <p className="text-sm text-slate-500">
                   {multiImportStep === 1 && 'Select sheets to import as batches'}
                   {multiImportStep === 2 && 'Map coin codes to coin types'}
