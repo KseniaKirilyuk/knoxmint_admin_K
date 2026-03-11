@@ -419,7 +419,7 @@ export default function Batches() {
       })
       setSelectedSheets(preSelected)
       
-      setMultiImportStep(1); alert("sheets: " + sheets.length + " parsedData: " + Object.keys(parsedData).join(","))
+      setMultiImportStep(1)
       setShowMultiImportModal(true)
     } catch (err) {
       setError("Error reading file: " + err.message); alert("PARSE ERROR: " + err.message)
@@ -513,7 +513,7 @@ export default function Batches() {
 
   const resetMultiImport = () => {
     setShowMultiImportModal(false)
-    setMultiImportStep(1); alert("sheets: " + sheets.length + " parsedData: " + Object.keys(parsedData).join(","))
+    setMultiImportStep(1)
     setImportFile(null)
     setAvailableSheets([])
     setSelectedSheets({})
@@ -2198,7 +2198,7 @@ export default function Batches() {
               <div className="flex gap-3">
                 {multiImportStep === 2 && (
                   <button
-                    onClick={() => setMultiImportStep(1); alert("sheets: " + sheets.length + " parsedData: " + Object.keys(parsedData).join(","))}
+                    onClick={() => setMultiImportStep(1)}
                     className="btn btn-secondary"
                   >
                     Back
