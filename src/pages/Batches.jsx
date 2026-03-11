@@ -379,8 +379,8 @@ export default function Batches() {
         if (priceRows.length > 1) {
           const ph = (priceRows[0] || []).map(c => c != null ? String(c).trim().toLowerCase() : '')
           const ccIdx = ph.indexOf('coin cost')
-          const g70Idx = ph.findIndex(h => h.indexOf('70') !== -1)
-          const g69Idx = ph.findIndex(h => h.indexOf('69') !== -1)
+          const g70Idx = ph.findIndex(h => h && h.indexOf('70') !== -1)
+          const g69Idx = ph.findIndex(h => h && h.indexOf('69') !== -1)
           const ugIdx = ph.indexOf('ungraded')
           const pd = v => { if (v == null || v === '') return null; const n = parseFloat(String(v).replace(/[$,]/g,'')); return isNaN(n) ? null : n }
           priceRows.slice(1).forEach(row => {
