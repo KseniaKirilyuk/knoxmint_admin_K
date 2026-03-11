@@ -141,7 +141,7 @@ export default function Batches() {
       setShowCreateModal(false)
       setCreateForm({ batchName: '', shipDate: '', grader: '', notes: '' })
       fetchData()
-    } catch (err) {
+    } catch (err) { alert(err.stack || err.message)
       alert(err.response?.data?.error || 'Error creating batch')
     }
   }
@@ -156,7 +156,7 @@ export default function Batches() {
       if (expandedBatch === selectedBatchId) {
         fetchBatchDetails(selectedBatchId)
       }
-    } catch (err) {
+    } catch (err) { alert(err.stack || err.message)
       alert(err.response?.data?.error || 'Error updating batch')
     }
   }
@@ -171,7 +171,7 @@ export default function Batches() {
         setExpandedBatch(null)
         setBatchDetails(null)
       }
-    } catch (err) {
+    } catch (err) { alert(err.stack || err.message)
       alert('Error deleting batch')
     }
   }
@@ -215,7 +215,7 @@ export default function Batches() {
       
       setShowPricesModal(false)
       fetchBatchDetails(selectedBatchId)
-    } catch (err) {
+    } catch (err) { alert(err.stack || err.message)
       alert('Error saving prices')
     }
   }
@@ -263,7 +263,7 @@ export default function Batches() {
       setShowEditContribModal(false)
       fetchBatchDetails(selectedBatchId)
       fetchData() // Refresh batch list totals
-    } catch (err) {
+    } catch (err) { alert(err.stack || err.message)
       alert('Error saving contributions')
     }
   }
@@ -275,7 +275,7 @@ export default function Batches() {
       setEditContributions(prev => prev.filter(c => c.id !== contribId))
       fetchBatchDetails(selectedBatchId)
       fetchData()
-    } catch (err) {
+    } catch (err) { alert(err.stack || err.message)
       alert('Error deleting contribution')
     }
   }
@@ -309,7 +309,7 @@ export default function Batches() {
       setEditContributions(contribCopy)
       
       fetchData()
-    } catch (err) {
+    } catch (err) { alert(err.stack || err.message)
       alert('Error adding contribution: ' + (err.response?.data?.error || err.message))
     }
   }
@@ -409,7 +409,7 @@ export default function Batches() {
       
       setMultiImportStep(1)
       setShowMultiImportModal(true)
-    } catch (err) {
+    } catch (err) { alert(err.stack || err.message)
       setError('Error reading file: ' + err.message)
     }
   }
@@ -493,7 +493,7 @@ export default function Batches() {
       setMultiImportStep(4)
       fetchData()
       fetchCoinTypes()
-    } catch (err) {
+    } catch (err) { alert(err.stack || err.message)
       setError('Import failed: ' + (err.response?.data?.error || err.message))
       setMultiImportStep(2)
     }
@@ -845,7 +845,7 @@ export default function Batches() {
       setCoinPrices(parsedPrices)
       setCoinMappings(initialMappings)
 
-    } catch (err) {
+    } catch (err) { alert(err.stack || err.message)
       setError('Error parsing file: ' + err.message)
     }
   }
@@ -891,7 +891,7 @@ export default function Batches() {
       if (expandedBatch === selectedBatchId) {
         fetchBatchDetails(selectedBatchId)
       }
-    } catch (err) {
+    } catch (err) { alert(err.stack || err.message)
       setError(err.response?.data?.error || 'Upload failed')
     } finally {
       setUploading(false)
@@ -1048,7 +1048,7 @@ export default function Batches() {
                           const res = await api.post('/batches?action=cleanupUngradedContributions', { batchId: batch.batch_id });
                           alert(res.data.message);
                           fetchBatchDetails(batch.batch_id);
-                        } catch (err) {
+                        } catch (err) { alert(err.stack || err.message)
                           alert('Error: ' + (err.response?.data?.error || err.message));
                         }
                       }}
