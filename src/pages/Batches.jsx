@@ -351,24 +351,12 @@ export default function Batches() {
         // Coin codes are all other columns after member column
         const coinCodes = headers.slice(memberCol + 1).filter(h => h && h.toString().trim())
         
-        // Find prices header row index
-        let pricesHeaderIdx = -1
-        for (let i = 1; i < jsonData.length; i++) {
-          const row = jsonData[i] || []
-          if (row.some(c => String(c || '').trim().toLowerCase() === 'coin cost')) {
-            pricesHeaderIdx = i; break
-          }
-        }
-        const contribRows = pricesHeaderIdx === -1 ? jsonData.slice(1) : jsonData.slice(1, pricesHeaderIdx)
-        const priceRows   = pricesHeaderIdx === -1 ? [] : jsonData.slice(pricesHeaderIdx)
-
-        // Parse contributions
+        // Parse member contributions
         const contributions = {}
-        const coinCodeSet = new Set(coinCodes.map(c => String(c).trim()))
-        contribRows.forEach(row => {
+        jsonData.slice(1).forEach(row => {
           const memberName = row[memberCol]
           if (!memberName) return
-          if (coinCodeSet.has(String(memberName).trim())) return
+          
           coinCodes.forEach((code, idx) => {
             const qty = parseFloat(row[memberCol + 1 + idx]) || 0
             if (qty > 0) {
@@ -377,34 +365,11 @@ export default function Batches() {
             }
           })
         })
-
-        // Parse prices
-        const prices = {}
-        if (priceRows.length > 1) {
-          const ph = (priceRows[0] || []).map(c => String(c == null ? '' : c).trim().toLowerCase())
-          const ccIdx  = ph.indexOf('coin cost')
-          const g70Idx = ph.findIndex(h => h.indexOf('70') !== -1)
-          const g69Idx = ph.findIndex(h => h.indexOf('69') !== -1)
-          const ugIdx  = ph.indexOf('ungraded')
-          const pd = v => { if (v == null || v === '') return null; const n = parseFloat(String(v).replace(/[$,]/g,'')); return isNaN(n) ? null : n }
-          priceRows.slice(1).forEach(row => {
-            if (!row) return
-            const code = String(row[0] == null ? '' : row[0]).trim()
-            if (!code) return
-            prices[code] = {
-              coinCost:  pd(ccIdx  >= 0 ? row[ccIdx]  : null),
-              grading70: pd(g70Idx >= 0 ? row[g70Idx] : null),
-              grading69: pd(g69Idx >= 0 ? row[g69Idx] : null),
-              ungraded:  pd(ugIdx  >= 0 ? row[ugIdx]  : null),
-            }
-          })
-        }
-
+        
         parsedData[sheetName] = {
           coinCodes,
           contributions,
-          prices,
-          totalMembers: new Set(contribRows.map(r => r[memberCol]).filter(Boolean)).size
+          totalMembers: new Set(jsonData.slice(1).map(r => r[memberCol]).filter(Boolean)).size
         }
       })
       
@@ -490,8 +455,7 @@ export default function Batches() {
         
         batchesToImport.push({
           batchName: sheetName,
-          contributions,
-          prices: sheet.prices || {}
+          contributions
         })
       })
       
