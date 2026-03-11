@@ -417,7 +417,7 @@ export default function Batches() {
       setMultiImportStep(1)
       setShowMultiImportModal(true)
     } catch (err) {
-      setError('Error reading file: ' + err.message)
+      setError("Error reading file: " + err.message); alert("ERROR: " + err.message)
     }
   }
 
