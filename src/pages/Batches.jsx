@@ -964,7 +964,7 @@ export default function Batches() {
               type="file"
               accept=".xlsx,.xls"
               className="hidden"
-              onChange={(e) => e.target.files?.[0] && handleMultiImportFile(e.target.files[0])}
+              onClick={(e) => e.target.value = null} onChange={(e) => e.target.files?.[0] && handleMultiImportFile(e.target.files[0])}
             />
           </label>
           <button onClick={() => setShowCreateModal(true)} className="btn btn-primary gap-2">
