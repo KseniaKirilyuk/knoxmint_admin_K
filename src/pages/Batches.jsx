@@ -315,7 +315,7 @@ export default function Batches() {
   }
 
   // Multi-batch import functions
-  const handleMultiImportFile = async (file) => {
+  const handleMultiImportFile = async (file) => { alert("function called: " + file.name)
     setImportFile(file)
     setError('')
     
@@ -406,6 +406,12 @@ export default function Batches() {
           })
         }
 
+        parsedData[sheetName] = {
+          coinCodes,
+          contributions,
+          prices,
+          totalMembers: new Set(contribRows.map(r => r[memberCol]).filter(Boolean)).size
+        }
       })
       
       setSheetData(parsedData)
@@ -420,7 +426,6 @@ export default function Batches() {
       setSelectedSheets(preSelected)
       
       setMultiImportStep(1)
-      alert('sheets:' + sheets.length + ' keys:' + Object.keys(parsedData).join(','))
       setShowMultiImportModal(true)
     } catch (err) {
       setError("Error reading file: " + err.message); alert("PARSE ERROR: " + err.message)
