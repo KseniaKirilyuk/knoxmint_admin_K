@@ -315,7 +315,7 @@ export default function Batches() {
   }
 
   // Multi-batch import functions
-  const handleMultiImportFile = async (file) => { alert("function called: " + file.name)
+  const handleMultiImportFile = async (file) => {
     setImportFile(file)
     setError('')
     
