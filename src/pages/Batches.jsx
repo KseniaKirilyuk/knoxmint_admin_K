@@ -420,6 +420,7 @@ export default function Batches() {
       setSelectedSheets(preSelected)
       
       setMultiImportStep(1)
+      alert('sheets:' + sheets.length + ' keys:' + Object.keys(parsedData).join(','))
       setShowMultiImportModal(true)
     } catch (err) {
       setError("Error reading file: " + err.message); alert("PARSE ERROR: " + err.message)
