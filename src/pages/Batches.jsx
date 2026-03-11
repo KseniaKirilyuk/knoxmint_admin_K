@@ -368,13 +368,17 @@ export default function Batches() {
             // Parse prices row: coinCode in col 0, then cost/grading values
             const coinCode = String(row[0] || '').trim()
             if (!coinCode) return
-            const ph = jsonData.find(r => (r || []).map(c => String(c || '').toLowerCase()).join('|').includes('coin cost')) || []
-            const phLower = ph.map(c => String(c || '').trim().toLowerCase())
+            const priceHeader = jsonData.find(r => (r || []).some(c => String(c || '').trim().toLowerCase() === 'coin cost')) || []
+            const phLower = priceHeader.map(c => String(c || '').trim().toLowerCase())
+            const ccIdx = phLower.findIndex(h => h === 'coin cost')
+            const g70Idx = phLower.findIndex(h => h.includes('70'))
+            const g69Idx = phLower.findIndex(h => h.includes('69'))
+            const ugIdx = phLower.findIndex(h => h === 'ungraded')
             prices[coinCode] = {
-              coinCost:  parseDollarVal(row[phLower.findIndex(h => h.includes('coin cost'))]),
-              grading70: parseDollarVal(row[phLower.findIndex(h => h.includes('grading') && h.includes('70'))]),
-              grading69: parseDollarVal(row[phLower.findIndex(h => h.includes('grading') && h.includes('69'))]),
-              ungraded:  parseDollarVal(row[phLower.findIndex(h => h === 'ungraded')]),
+              coinCost:  parseDollarVal(ccIdx  >= 0 ? row[ccIdx]  : null),
+              grading70: parseDollarVal(g70Idx >= 0 ? row[g70Idx] : null),
+              grading69: parseDollarVal(g69Idx >= 0 ? row[g69Idx] : null),
+              ungraded:  parseDollarVal(ugIdx  >= 0 ? row[ugIdx]  : null),
             }
             return
           }
@@ -417,7 +421,7 @@ export default function Batches() {
       setMultiImportStep(1)
       setShowMultiImportModal(true)
     } catch (err) {
-      setError("Error reading file: " + err.message); alert("ERROR: " + err.message)
+      setError("Error reading file: " + err.message)
     }
   }
 
@@ -959,7 +963,7 @@ export default function Batches() {
         <div className="flex items-center gap-3">
           <label className="btn btn-secondary gap-2 cursor-pointer">
             <UploadIcon className="w-4 h-4" />
-            Import Batches ✓
+            Import Batches
             <input
               type="file"
               accept=".xlsx,.xls"
@@ -1951,7 +1955,7 @@ export default function Batches() {
             {/* Header */}
             <div className="px-6 py-4 border-b flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold">Import Batches ✓</h2>
+                <h2 className="text-lg font-semibold">Import Batches</h2>
                 <p className="text-sm text-slate-500">
                   {multiImportStep === 1 && 'Select sheets to import as batches'}
                   {multiImportStep === 2 && 'Map coin codes to coin types'}
