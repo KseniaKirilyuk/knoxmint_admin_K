@@ -315,7 +315,7 @@ export default function Batches() {
   }
 
   // Multi-batch import functions
-  const handleMultiImportFile = async (file) => { alert("function called: " + file.name)
+  const handleMultiImportFile = async (file) => {
     setImportFile(file)
     setError('')
     
@@ -351,32 +351,12 @@ export default function Batches() {
         // Coin codes are all other columns after member column
         const coinCodes = headers.slice(memberCol + 1).filter(h => h && h.toString().trim())
         
-        const coinCodeSet = new Set(coinCodes.map(c => String(c).trim()))
-        const parseDollarVal = v => {
-          if (v == null || v === '') return null
-          const n = parseFloat(String(v).replace(/[$,]/g, ''))
-          return isNaN(n) ? null : n
-        }
-
-        // Find prices header row (row where one cell exactly equals 'Coin Cost')
-        let pricesHeaderIdx = -1
-        for (let i = 1; i < jsonData.length; i++) {
-          if ((jsonData[i] || []).some(c => String(c || '').trim().toLowerCase() === 'coin cost')) {
-            pricesHeaderIdx = i
-            break
-          }
-        }
-
-        // Split rows into contributions and prices
-        const contribRows = pricesHeaderIdx === -1 ? jsonData.slice(1) : jsonData.slice(1, pricesHeaderIdx)
-        const priceRows   = pricesHeaderIdx === -1 ? [] : jsonData.slice(pricesHeaderIdx)
-
-        // Parse contributions
+        // Parse member contributions
         const contributions = {}
-        contribRows.forEach(row => {
+        jsonData.slice(1).forEach(row => {
           const memberName = row[memberCol]
           if (!memberName) return
-          if (coinCodeSet.has(String(memberName).trim())) return
+          
           coinCodes.forEach((code, idx) => {
             const qty = parseFloat(row[memberCol + 1 + idx]) || 0
             if (qty > 0) {
@@ -385,32 +365,11 @@ export default function Batches() {
             }
           })
         })
-
-        // Parse prices section
-        const prices = {}
-        if (priceRows.length > 1) {
-          const ph = (priceRows[0] || []).map(c => String(c || '').trim().toLowerCase())
-          const ccIdx  = ph.findIndex(h => h === 'coin cost')
-          const g70Idx = ph.findIndex(h => h.includes('70'))
-          const g69Idx = ph.findIndex(h => h.includes('69'))
-          const ugIdx  = ph.findIndex(h => h === 'ungraded')
-          priceRows.slice(1).forEach(row => {
-            const code = String(row[0] || '').trim()
-            if (!code) return
-            prices[code] = {
-              coinCost:  parseDollarVal(ccIdx  >= 0 ? row[ccIdx]  : null),
-              grading70: parseDollarVal(g70Idx >= 0 ? row[g70Idx] : null),
-              grading69: parseDollarVal(g69Idx >= 0 ? row[g69Idx] : null),
-              ungraded:  parseDollarVal(ugIdx  >= 0 ? row[ugIdx]  : null),
-            }
-          })
-        }
-
+        
         parsedData[sheetName] = {
           coinCodes,
           contributions,
-          prices,
-          totalMembers: new Set(contribRows.map(r => r[memberCol]).filter(Boolean)).size
+          totalMembers: new Set(jsonData.slice(1).map(r => r[memberCol]).filter(Boolean)).size
         }
       })
       
@@ -428,7 +387,7 @@ export default function Batches() {
       setMultiImportStep(1)
       setShowMultiImportModal(true)
     } catch (err) {
-      setError("Error reading file: " + err.message); alert("PARSE ERROR: " + err.message)
+      setError('Error reading file: ' + err.message)
     }
   }
 
@@ -496,8 +455,7 @@ export default function Batches() {
         
         batchesToImport.push({
           batchName: sheetName,
-          contributions,
-          prices: sheet.prices || {}
+          contributions
         })
       })
       
@@ -975,7 +933,7 @@ export default function Batches() {
               type="file"
               accept=".xlsx,.xls"
               className="hidden"
-              onClick={(e) => e.target.value = null} onChange={(e) => e.target.files?.[0] && handleMultiImportFile(e.target.files[0])}
+              onChange={(e) => e.target.files?.[0] && handleMultiImportFile(e.target.files[0])}
             />
           </label>
           <button onClick={() => setShowCreateModal(true)} className="btn btn-primary gap-2">
