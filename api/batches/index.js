@@ -28,12 +28,13 @@ async function ensureCoinTypeColumns() {
   try {
     await query(`ALTER TABLE coin_types ADD COLUMN IF NOT EXISTS catalog_id VARCHAR(50)`);
     await query(`ALTER TABLE coin_types ADD COLUMN IF NOT EXISTS is_ungraded BOOLEAN DEFAULT false`);
+    await query(`ALTER TABLE coin_types ADD COLUMN IF NOT EXISTS keywords TEXT[]`);
     // Increase short_code size to accommodate "-UNGRADED" suffix
     await query(`ALTER TABLE coin_types ALTER COLUMN short_code TYPE VARCHAR(50)`);
     // Migrate existing coins - set catalog_id from short_code if not set
     await query(`UPDATE coin_types SET catalog_id = short_code WHERE catalog_id IS NULL AND short_code IS NOT NULL`);
   } catch (e) {
-    // Ignore - columns may already exist
+    // Ignore - columns may already exist or migration not needed
   }
 }
 
@@ -754,21 +755,33 @@ export default async function handler(req, res) {
 
             // Check if this coin was manually mapped to an existing type
             let coinTypeId;
-            if (coinMappings && coinMappings[coinType]) {
-              coinTypeId = coinMappings[coinType];
+            const coinTypeValue = String(coinType || '').trim();
+            if (!coinTypeValue) continue;
+
+            if (coinMappings && coinMappings[coinTypeValue]) {
+              coinTypeId = coinMappings[coinTypeValue];
             } else {
-              // Find or create coin type
+              // Find or create coin type by name, short_code, or catalog_id
               let coinTypeResult = await query(
-                'SELECT coin_type_id FROM coin_types WHERE LOWER(name) = LOWER($1)',
-                [coinType]
+                `SELECT coin_type_id FROM coin_types WHERE LOWER(name) = LOWER($1) OR LOWER(short_code) = LOWER($1) OR LOWER(catalog_id) = LOWER($1) LIMIT 1`,
+                [coinTypeValue]
               );
               
               if (coinTypeResult.rows.length === 0) {
-                const newCoinType = await query(
-                  'INSERT INTO coin_types (name, short_code, keywords) VALUES ($1, $2, $3) RETURNING coin_type_id',
-                  [coinType, coinType.substring(0, 10).toUpperCase(), [coinType]]
-                );
-                coinTypeId = newCoinType.rows[0].coin_type_id;
+                const shortCode = coinTypeValue.substring(0, 10).toUpperCase();
+                const keywordArray = [coinTypeValue];
+                const insertSql = `INSERT INTO coin_types (name, short_code, catalog_id, keywords) VALUES ($1, $2, $3, $4) RETURNING coin_type_id`;
+                try {
+                  const newCoinType = await query(insertSql, [coinTypeValue, shortCode, shortCode, keywordArray]);
+                  coinTypeId = newCoinType.rows[0].coin_type_id;
+                } catch (insertErr) {
+                  // Fallback in case the keywords column is not present
+                  const newCoinType = await query(
+                    `INSERT INTO coin_types (name, short_code, catalog_id) VALUES ($1, $2, $3) RETURNING coin_type_id`,
+                    [coinTypeValue, shortCode, shortCode]
+                  );
+                  coinTypeId = newCoinType.rows[0].coin_type_id;
+                }
               } else {
                 coinTypeId = coinTypeResult.rows[0].coin_type_id;
               }
