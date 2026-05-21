@@ -469,10 +469,9 @@ export default async function handler(req, res) {
 
         // First, create any new coin types
         for (const [code, mapping] of Object.entries(coinCodeMappings || {})) {
-          const isNewMapping = mapping === 'new' || (mapping && mapping.action === 'new');
-          if (isNewMapping) {
+          if (mapping === 'new' && newCoinTypes?.[code]) {
             try {
-              const { name, shortCode } = newCoinTypes?.[code] || { name: code, shortCode: code };
+              const { name, shortCode } = newCoinTypes[code];
               const existing = await query(
                 'SELECT coin_type_id FROM coin_types WHERE LOWER(name) = LOWER($1) OR LOWER(short_code) = LOWER($2)',
                 [name, shortCode || name]
@@ -531,17 +530,8 @@ export default async function handler(req, res) {
                   // Check cache for newly created coin types
                   if (coinTypeCache[coinCode]) {
                     resolvedCoinTypeId = coinTypeCache[coinCode];
-                  } else {
-                    const mapping = coinCodeMappings[coinCode];
-                    if (mapping) {
-                      if (typeof mapping === 'object') {
-                        if (mapping.coinTypeId) {
-                          resolvedCoinTypeId = parseInt(mapping.coinTypeId);
-                        }
-                      } else if (mapping !== 'new') {
-                        resolvedCoinTypeId = parseInt(mapping);
-                      }
-                    }
+                  } else if (coinCodeMappings[coinCode] && coinCodeMappings[coinCode] !== 'new') {
+                    resolvedCoinTypeId = parseInt(coinCodeMappings[coinCode]);
                   }
                 }
 

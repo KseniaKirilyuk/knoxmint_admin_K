@@ -34,39 +34,7 @@ async function ensureCoinTypeColumns() {
     // Migrate existing coins - set catalog_id from short_code if not set
     await query(`UPDATE coin_types SET catalog_id = short_code WHERE catalog_id IS NULL AND short_code IS NOT NULL`);
   } catch (e) {
-    // Ignore - columns may already exist or migration not needed
-  }
-}
-
-function normalizeBatchCode(batchName) {
-  if (!batchName) return null;
-  return batchName
-    .toString()
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/(^-|-$)/g, '') || null;
-}
-
-async function ensureBatchColumns() {
-  try {
-    await query(`ALTER TABLE batches ADD COLUMN IF NOT EXISTS batch_code VARCHAR(100)`);
-    await query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_batches_batch_code ON batches (batch_code)`);
-  } catch (e) {
-    // Ignore - column may already exist or index may already exist
-  }
-}
-
-async function generateBatchCode(batchName) {
-  const base = normalizeBatchCode(batchName) || `batch-${Date.now()}`;
-  let candidate = base;
-  let suffix = 0;
-
-  while (true) {
-    const existing = await query('SELECT batch_id FROM batches WHERE batch_code = $1', [candidate]);
-    if (existing.rows.length === 0) return candidate;
-    suffix += 1;
-    candidate = `${base}-${suffix}`;
+    // Ignore - columns may already exist
   }
 }
 
@@ -206,14 +174,11 @@ export default async function handler(req, res) {
         const { batchName, shipDate, grader, notes } = req.body;
         if (!batchName) return res.status(400).json({ error: 'Batch name required' });
 
-        await ensureBatchColumns();
-        const batchCode = await generateBatchCode(batchName);
-
         const result = await query(
-          `INSERT INTO batches (batch_name, ship_date, grader, notes, batch_code)
-           VALUES ($1, $2, $3, $4, $5)
+          `INSERT INTO batches (batch_name, ship_date, grader, notes)
+           VALUES ($1, $2, $3, $4)
            RETURNING *`,
-          [batchName, shipDate || null, grader, notes, batchCode]
+          [batchName, shipDate || null, grader, notes]
         );
         return res.status(201).json(result.rows[0]);
       }
@@ -499,7 +464,6 @@ export default async function handler(req, res) {
 
       // Bulk import multiple batches
       if (action === 'bulkImport') {
-        await ensureBatchColumns();
         const { batches, coinCodeMappings, newCoinTypes } = req.body;
         
         if (!batches || !Array.isArray(batches)) {
@@ -514,9 +478,10 @@ export default async function handler(req, res) {
 
         // First, create any new coin types
         for (const [code, mapping] of Object.entries(coinCodeMappings || {})) {
-          if (mapping === 'new' && newCoinTypes?.[code]) {
+          const isNewMapping = mapping === 'new' || (mapping && mapping.action === 'new');
+          if (isNewMapping) {
             try {
-              const { name, shortCode } = newCoinTypes[code];
+              const { name, shortCode } = newCoinTypes?.[code] || { name: code, shortCode: code };
               const existing = await query(
                 'SELECT coin_type_id FROM coin_types WHERE LOWER(name) = LOWER($1) OR LOWER(short_code) = LOWER($2)',
                 [name, shortCode || name]
@@ -526,8 +491,8 @@ export default async function handler(req, res) {
                 coinTypeCache[code] = existing.rows[0].coin_type_id;
               } else {
                 const result = await query(
-                  'INSERT INTO coin_types (name, short_code) VALUES ($1, $2) RETURNING coin_type_id',
-                  [name, shortCode || null]
+                  'INSERT INTO coin_types (name, short_code, catalog_id, keywords) VALUES ($1, $2, $3, $4) RETURNING coin_type_id',
+                  [name, shortCode || null, shortCode || null, [name, shortCode || name]]
                 );
                 coinTypeCache[code] = result.rows[0].coin_type_id;
                 coinTypesCreated++;
@@ -551,7 +516,13 @@ export default async function handler(req, res) {
                 ctId = String(coinTypeCache[code]);
               } else {
                 const m = coinCodeMappings?.[code];
-                if (m && m !== 'new') ctId = String(m.coinTypeId || m);
+                if (m) {
+                  if (typeof m === 'object' && m.coinTypeId) {
+                    ctId = String(m.coinTypeId);
+                  } else if (m !== 'new') {
+                    ctId = String(m);
+                  }
+                }
               }
               if (ctId) resolvedPrices[ctId] = p;
             }
@@ -565,22 +536,10 @@ export default async function handler(req, res) {
             let batchId;
             if (existingBatch.rows.length > 0) {
               batchId = existingBatch.rows[0].batch_id;
-              const existingCodeResult = await query(
-                'SELECT batch_code FROM batches WHERE batch_id = $1',
-                [batchId]
-              );
-              if (!existingCodeResult.rows[0]?.batch_code) {
-                const batchCode = await generateBatchCode(batchName);
-                await query(
-                  'UPDATE batches SET batch_code = $1 WHERE batch_id = $2',
-                  [batchCode, batchId]
-                );
-              }
             } else {
-              const batchCode = await generateBatchCode(batchName);
               const batchResult = await query(
-                'INSERT INTO batches (batch_name, batch_code) VALUES ($1, $2) RETURNING batch_id',
-                [batchName, batchCode]
+                'INSERT INTO batches (batch_name) VALUES ($1) RETURNING batch_id',
+                [batchName]
               );
               batchId = batchResult.rows[0].batch_id;
               batchesCreated++;
@@ -605,8 +564,17 @@ export default async function handler(req, res) {
                   // Check cache for newly created coin types
                   if (coinTypeCache[coinCode]) {
                     resolvedCoinTypeId = coinTypeCache[coinCode];
-                  } else if (coinCodeMappings[coinCode] && coinCodeMappings[coinCode] !== 'new') {
-                    resolvedCoinTypeId = parseInt(coinCodeMappings[coinCode]);
+                  } else {
+                    const mapping = coinCodeMappings?.[coinCode];
+                    if (mapping) {
+                      if (typeof mapping === 'object') {
+                        if (mapping.coinTypeId) {
+                          resolvedCoinTypeId = parseInt(mapping.coinTypeId);
+                        }
+                      } else if (mapping !== 'new') {
+                        resolvedCoinTypeId = parseInt(mapping);
+                      }
+                    }
                   }
                 }
 
@@ -714,17 +682,9 @@ export default async function handler(req, res) {
 
       // Upload contributions for a batch
       if (action === 'uploadContributions') {
-        await ensureBatchColumns();
         const { batchId, contributions, coinPrices, coinMappings } = req.body;
         if (!batchId || !contributions) {
           return res.status(400).json({ error: 'Batch ID and contributions required' });
-        }
-
-        // Ensure the batch has a normalized code for later matching
-        const existingBatch = await query('SELECT batch_code, batch_name FROM batches WHERE batch_id = $1', [batchId]);
-        if (existingBatch.rows.length > 0 && !existingBatch.rows[0].batch_code) {
-          const batchCode = await generateBatchCode(existingBatch.rows[0].batch_name || `batch-${batchId}`);
-          await query('UPDATE batches SET batch_code = $1 WHERE batch_id = $2', [batchCode, batchId]);
         }
 
         let imported = 0;
@@ -755,33 +715,27 @@ export default async function handler(req, res) {
 
             // Check if this coin was manually mapped to an existing type
             let coinTypeId;
-            const coinTypeValue = String(coinType || '').trim();
-            if (!coinTypeValue) continue;
-
-            if (coinMappings && coinMappings[coinTypeValue]) {
-              coinTypeId = coinMappings[coinTypeValue];
+            if (coinMappings && coinMappings[coinType]) {
+              const mapping = coinMappings[coinType];
+              if (typeof mapping === 'object' && mapping.coinTypeId) {
+                coinTypeId = mapping.coinTypeId;
+              } else if (mapping !== 'new') {
+                coinTypeId = mapping;
+              }
             } else {
-              // Find or create coin type by name, short_code, or catalog_id
+              // Find or create coin type by name/short_code/catalog_id
               let coinTypeResult = await query(
                 `SELECT coin_type_id FROM coin_types WHERE LOWER(name) = LOWER($1) OR LOWER(short_code) = LOWER($1) OR LOWER(catalog_id) = LOWER($1) LIMIT 1`,
-                [coinTypeValue]
+                [coinType]
               );
               
               if (coinTypeResult.rows.length === 0) {
-                const shortCode = coinTypeValue.substring(0, 10).toUpperCase();
-                const keywordArray = [coinTypeValue];
-                const insertSql = `INSERT INTO coin_types (name, short_code, catalog_id, keywords) VALUES ($1, $2, $3, $4) RETURNING coin_type_id`;
-                try {
-                  const newCoinType = await query(insertSql, [coinTypeValue, shortCode, shortCode, keywordArray]);
-                  coinTypeId = newCoinType.rows[0].coin_type_id;
-                } catch (insertErr) {
-                  // Fallback in case the keywords column is not present
-                  const newCoinType = await query(
-                    `INSERT INTO coin_types (name, short_code, catalog_id) VALUES ($1, $2, $3) RETURNING coin_type_id`,
-                    [coinTypeValue, shortCode, shortCode]
-                  );
-                  coinTypeId = newCoinType.rows[0].coin_type_id;
-                }
+                const shortCode = coinType.substring(0, 10).toUpperCase();
+                const newCoinType = await query(
+                  'INSERT INTO coin_types (name, short_code, catalog_id, keywords) VALUES ($1, $2, $3, $4) RETURNING coin_type_id',
+                  [coinType, shortCode, shortCode, [coinType]]
+                );
+                coinTypeId = newCoinType.rows[0].coin_type_id;
               } else {
                 coinTypeId = coinTypeResult.rows[0].coin_type_id;
               }
