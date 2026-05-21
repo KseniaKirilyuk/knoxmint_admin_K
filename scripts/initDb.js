@@ -46,6 +46,7 @@ CREATE TABLE coin_types (
 CREATE TABLE batches (
     batch_id SERIAL PRIMARY KEY,
     batch_name VARCHAR(100) NOT NULL,
+    batch_code VARCHAR(100) UNIQUE,
     ship_date DATE,
     grader VARCHAR(20),
     status VARCHAR(20) DEFAULT 'Active',

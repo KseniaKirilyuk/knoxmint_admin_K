@@ -37,6 +37,38 @@ async function ensureCoinTypeColumns() {
   }
 }
 
+function normalizeBatchCode(batchName) {
+  if (!batchName) return null;
+  return batchName
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '') || null;
+}
+
+async function ensureBatchColumns() {
+  try {
+    await query(`ALTER TABLE batches ADD COLUMN IF NOT EXISTS batch_code VARCHAR(100)`);
+    await query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_batches_batch_code ON batches (batch_code)`);
+  } catch (e) {
+    // Ignore - column may already exist or index may already exist
+  }
+}
+
+async function generateBatchCode(batchName) {
+  const base = normalizeBatchCode(batchName) || `batch-${Date.now()}`;
+  let candidate = base;
+  let suffix = 0;
+
+  while (true) {
+    const existing = await query('SELECT batch_id FROM batches WHERE batch_code = $1', [candidate]);
+    if (existing.rows.length === 0) return candidate;
+    suffix += 1;
+    candidate = `${base}-${suffix}`;
+  }
+}
+
 export default async function handler(req, res) {
   const user = verifyToken(req);
   if (!user) return res.status(401).json({ error: 'Authentication required' });
@@ -173,11 +205,14 @@ export default async function handler(req, res) {
         const { batchName, shipDate, grader, notes } = req.body;
         if (!batchName) return res.status(400).json({ error: 'Batch name required' });
 
+        await ensureBatchColumns();
+        const batchCode = await generateBatchCode(batchName);
+
         const result = await query(
-          `INSERT INTO batches (batch_name, ship_date, grader, notes)
-           VALUES ($1, $2, $3, $4)
+          `INSERT INTO batches (batch_name, ship_date, grader, notes, batch_code)
+           VALUES ($1, $2, $3, $4, $5)
            RETURNING *`,
-          [batchName, shipDate || null, grader, notes]
+          [batchName, shipDate || null, grader, notes, batchCode]
         );
         return res.status(201).json(result.rows[0]);
       }
@@ -463,6 +498,7 @@ export default async function handler(req, res) {
 
       // Bulk import multiple batches
       if (action === 'bulkImport') {
+        await ensureBatchColumns();
         const { batches, coinCodeMappings, newCoinTypes } = req.body;
         
         if (!batches || !Array.isArray(batches)) {
@@ -528,10 +564,22 @@ export default async function handler(req, res) {
             let batchId;
             if (existingBatch.rows.length > 0) {
               batchId = existingBatch.rows[0].batch_id;
+              const existingCodeResult = await query(
+                'SELECT batch_code FROM batches WHERE batch_id = $1',
+                [batchId]
+              );
+              if (!existingCodeResult.rows[0]?.batch_code) {
+                const batchCode = await generateBatchCode(batchName);
+                await query(
+                  'UPDATE batches SET batch_code = $1 WHERE batch_id = $2',
+                  [batchCode, batchId]
+                );
+              }
             } else {
+              const batchCode = await generateBatchCode(batchName);
               const batchResult = await query(
-                'INSERT INTO batches (batch_name) VALUES ($1) RETURNING batch_id',
-                [batchName]
+                'INSERT INTO batches (batch_name, batch_code) VALUES ($1, $2) RETURNING batch_id',
+                [batchName, batchCode]
               );
               batchId = batchResult.rows[0].batch_id;
               batchesCreated++;
@@ -665,9 +713,17 @@ export default async function handler(req, res) {
 
       // Upload contributions for a batch
       if (action === 'uploadContributions') {
+        await ensureBatchColumns();
         const { batchId, contributions, coinPrices, coinMappings } = req.body;
         if (!batchId || !contributions) {
           return res.status(400).json({ error: 'Batch ID and contributions required' });
+        }
+
+        // Ensure the batch has a normalized code for later matching
+        const existingBatch = await query('SELECT batch_code, batch_name FROM batches WHERE batch_id = $1', [batchId]);
+        if (existingBatch.rows.length > 0 && !existingBatch.rows[0].batch_code) {
+          const batchCode = await generateBatchCode(existingBatch.rows[0].batch_name || `batch-${batchId}`);
+          await query('UPDATE batches SET batch_code = $1 WHERE batch_id = $2', [batchCode, batchId]);
         }
 
         let imported = 0;
