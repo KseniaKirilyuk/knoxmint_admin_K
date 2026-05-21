@@ -464,6 +464,7 @@ export default async function handler(req, res) {
 
       // Bulk import multiple batches
       if (action === 'bulkImport') {
+        await ensureCoinTypeColumns();
         const { batches, coinCodeMappings, newCoinTypes } = req.body;
         
         if (!batches || !Array.isArray(batches)) {
@@ -682,6 +683,7 @@ export default async function handler(req, res) {
 
       // Upload contributions for a batch
       if (action === 'uploadContributions') {
+        await ensureCoinTypeColumns();
         const { batchId, contributions, coinPrices, coinMappings } = req.body;
         if (!batchId || !contributions) {
           return res.status(400).json({ error: 'Batch ID and contributions required' });
